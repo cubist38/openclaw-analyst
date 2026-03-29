@@ -1,0 +1,116 @@
+# Starbucks Business Database Generator Configuration
+# Adjust these values to control the size and scope of generated data.
+
+# Random seed for reproducibility (same seed = same data)
+seed: 42
+
+# Database output path (relative to this file, or absolute)
+# Leave empty to use default: ~/.openclaw/workspace/data/starbucks_business.db
+db_path: ""
+
+# --- Scale ---
+num_stores: 50          # Number of store locations
+num_customers: 200      # Number of rewards customers
+num_feedback: 200       # Number of customer feedback entries
+
+# Employees per store (randomly chosen within range)
+employees_per_store:
+  baristas_min: 2
+  baristas_max: 4
+
+# District managers (not tied to a store)
+num_district_managers: 6
+
+# --- Date Range ---
+# Controls the time period for all transactional data:
+# daily_sales, customer_orders, delivery_orders, loyalty_transactions,
+# customer_feedback, labor_schedule, product_sales, store_traffic,
+# waste_log, inventory snapshots, and financial_summary.
+date_range:
+  start: "2026-01-01"   # YYYY-MM-DD
+  end: "2026-03-31"     # YYYY-MM-DD
+
+# --- Regions ---
+# Each region needs at least one city. Stores are distributed across cities randomly.
+regions:
+  - name: Pacific_NW
+    cities:
+      - city: Seattle
+        state: WA
+      - city: Portland
+        state: OR
+      - city: Tacoma
+        state: WA
+
+  - name: West
+    cities:
+      - city: San Francisco
+        state: CA
+      - city: Los Angeles
+        state: CA
+      - city: San Diego
+        state: CA
+      - city: Sacramento
+        state: CA
+      - city: Denver
+        state: CO
+      - city: Salt Lake City
+        state: UT
+      - city: Las Vegas
+        state: NV
+
+  - name: Southwest
+    cities:
+      - city: Phoenix
+        state: AZ
+      - city: Tucson
+        state: AZ
+      - city: Austin
+        state: TX
+      - city: Dallas
+        state: TX
+      - city: Houston
+        state: TX
+      - city: San Antonio
+        state: TX
+
+  - name: Midwest
+    cities:
+      - city: Chicago
+        state: IL
+      - city: Minneapolis
+        state: MN
+      - city: Detroit
+        state: MI
+      - city: Columbus
+        state: OH
+
+  - name: Southeast
+    cities:
+      - city: Atlanta
+        state: GA
+      - city: Miami
+        state: FL
+      - city: Orlando
+        state: FL
+      - city: Charlotte
+        state: NC
+      - city: Nashville
+        state: TN
+      - city: New Orleans
+        state: LA
+
+  - name: Northeast
+    cities:
+      - city: New York
+        state: NY
+      - city: Boston
+        state: MA
+      - city: Philadelphia
+        state: PA
+      - city: Washington
+        state: DC
+      - city: Baltimore
+        state: MD
+      - city: Pittsburgh
+        state: PA
