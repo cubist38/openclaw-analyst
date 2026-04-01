@@ -87,6 +87,9 @@ if [ ! -f "$APPROVALS_FILE" ]; then
         },
         {
           "pattern": "$(which python3)"
+        },
+        {
+          "pattern": "${WORKSPACE}/data/python3"
         }
       ]
     }
@@ -111,6 +114,10 @@ cp /opt/analyst/openclaw-config/GROUP_CHAT.md "$WORKSPACE/GROUP_CHAT.md"
 cp /opt/analyst/openclaw-config/HEARTBEAT_GUIDE.md "$WORKSPACE/HEARTBEAT_GUIDE.md"
 cp -r /opt/analyst/openclaw-config/skills/* "$WORKSPACE/skills/"
 cp /opt/analyst/openclaw-config/data/SCHEMA.md "$WORKSPACE/data/SCHEMA.md"
+
+# --- Symlink python3 into workspace (matches local install) ---
+ln -sf "$(which python3)" "$WORKSPACE/data/python3"
+echo "[entrypoint] Linked: $WORKSPACE/data/python3 -> $(which python3)"
 
 # --- Generate database if missing ---
 DB_FILE="$WORKSPACE/data/starbucks_business.db"

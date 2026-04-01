@@ -151,9 +151,26 @@ openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
     echo "  Allowlisted: $SQLITE3_PATH" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
 
+# Allowlist both the venv python3 (has charting libs) and system python3 (fallback)
 openclaw approvals allowlist add "$PYTHON3" 2>/dev/null && \
-    echo "  Allowlisted: $PYTHON3 (for chart generation)" || \
+    echo "  Allowlisted: $PYTHON3 (venv — has pandas, matplotlib, seaborn)" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
+
+SYSTEM_PYTHON3="$(which python3)"
+if [ "$SYSTEM_PYTHON3" != "$PYTHON3" ]; then
+    openclaw approvals allowlist add "$SYSTEM_PYTHON3" 2>/dev/null && \
+        echo "  Allowlisted: $SYSTEM_PYTHON3 (system)" || \
+        echo "  Already allowlisted or failed"
+fi
+
+# Symlink venv python3 into workspace so the bot can always use data/python3
+ln -sf "$PYTHON3" "$WORKSPACE/data/python3"
+echo "  Linked: $WORKSPACE/data/python3 -> $PYTHON3"
+
+# Allowlist the symlink path too (this is what the bot will actually call)
+openclaw approvals allowlist add "$WORKSPACE/data/python3" 2>/dev/null && \
+    echo "  Allowlisted: $WORKSPACE/data/python3" || \
+    echo "  Already allowlisted or failed"
 
 echo ""
 echo "=== Setup complete! ==="
