@@ -55,12 +55,23 @@ fi
 
 echo ""
 
-# --- Step 2: Install Python packages ---
+# --- Step 2: Set up Python virtual environment and install packages ---
 echo "[2/6] Installing Python packages..."
 
-pip3 install --quiet -r "$SCRIPT_DIR/requirements.txt" && \
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "  Creating virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+"$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt" && \
     echo "  Installed: pyyaml, pandas, matplotlib, seaborn" || \
-    { echo "  ERROR: Failed to install Python packages. Try: pip3 install -r requirements.txt"; exit 1; }
+    { echo "  ERROR: Failed to install Python packages."; exit 1; }
+
+# Use the venv python for all subsequent steps and for the bot's exec allowlist
+PYTHON3="$VENV_DIR/bin/python3"
+echo "  Using Python: $PYTHON3"
 
 echo ""
 
@@ -128,7 +139,7 @@ if [ -f "$DB_FILE" ]; then
     echo "  Database already exists at $DB_FILE"
     echo "  To regenerate, delete it first: rm \"$DB_FILE\""
 else
-    python3 "$SCRIPT_DIR/generate_starbucks_db.py"
+    "$PYTHON3" "$SCRIPT_DIR/generate_starbucks_db.py"
 fi
 echo ""
 
@@ -140,9 +151,8 @@ openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
     echo "  Allowlisted: $SQLITE3_PATH" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
 
-PYTHON3_PATH="$(which python3)"
-openclaw approvals allowlist add "$PYTHON3_PATH" 2>/dev/null && \
-    echo "  Allowlisted: $PYTHON3_PATH (for chart generation)" || \
+openclaw approvals allowlist add "$PYTHON3" 2>/dev/null && \
+    echo "  Allowlisted: $PYTHON3 (for chart generation)" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
 
 echo ""
