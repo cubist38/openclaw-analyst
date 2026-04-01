@@ -25,6 +25,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - Tier comparison (bullet format — no tables on Telegram)
    - Key finding: how gold members differ
    - Conversion opportunity: green to gold potential
-4. **Visual:** Generate a Cappuccino Cohort or Espresso Shot chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
+4. **Visual:** Generate a Cappuccino Cohort or Espresso Shot using `brew_chart` (auto-sends to Telegram)
 5. **Business Recommendation:** Loyalty program actions — who to target, how to convert
 6. **Next Pour:** "Want me to identify the customers most likely to upgrade to Gold?"

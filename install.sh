@@ -133,6 +133,9 @@ echo "  Copied data/SCHEMA.md (database schema)"
 cp "$SCRIPT_DIR/openclaw-config/data/send_photo.py" "$WORKSPACE/data/send_photo.py"
 echo "  Copied data/send_photo.py (Telegram image sender)"
 
+cp "$SCRIPT_DIR/openclaw-config/data/brew_chart.py" "$WORKSPACE/data/brew_chart.py"
+echo "  Copied data/brew_chart.py (chart helper with auto-send)"
+
 echo ""
 
 # --- Step 5: Generate database (skip if already exists) ---

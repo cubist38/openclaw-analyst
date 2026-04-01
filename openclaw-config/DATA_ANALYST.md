@@ -105,8 +105,7 @@ Follow the 6-step **Response Framework** in `SOUL.md` for every substantive anal
 
 You have **matplotlib, seaborn, pandas, and scipy** available. When the data calls for a visual:
 1. Lead with the text insight in bold
-2. Generate a PNG chart using the BrewMode theme — see `TECHNICAL_SKILLS.md` for the template
-3. **MANDATORY: Send it to the user** by running `data/python3 data/send_photo.py data/chart.png "caption"` — the user CANNOT see files on disk. If you skip this command, the chart is invisible and your response is broken.
+2. Write a chart script using `from brew_chart import ...` and end with `send(fig, path, caption)` — this saves the PNG AND sends it to Telegram automatically. See `TECHNICAL_SKILLS.md` for the template.
 
 Don't ask "want me to generate a chart?" — just do it when the data warrants it (trends, comparisons, distributions).
 

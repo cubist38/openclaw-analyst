@@ -26,6 +26,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - **Cash cows** (high revenue, lower margin)
    - **Question marks** (low revenue, high margin — undermarketed?)
    - **Dogs** (low revenue, low margin — cut candidates)
-4. **Visual:** Generate a Latte Art Heatmap or Espresso Shot chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
+4. **Visual:** Generate a Latte Art Heatmap or Espresso Shot using `brew_chart` (auto-sends to Telegram)
 5. **Business Recommendation:** Menu strategy — what to promote, what to cut, what to reprice
 6. **Next Pour:** "Want me to check how seasonal trends affect these products?"

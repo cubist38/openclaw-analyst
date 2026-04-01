@@ -25,6 +25,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - Fleet-wide overtime rate
    - Top 5 stores by overtime (flag if excessive)
    - Revenue per labor hour comparison
-4. **Visual:** Generate an Espresso Shot or Latte Art Heatmap chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
+4. **Visual:** Generate an Espresso Shot or Latte Art Heatmap using `brew_chart` (auto-sends to Telegram)
 5. **Business Recommendation:** Staffing actions — where to add/cut hours, overtime policy
 6. **Next Pour:** "Want me to model the cost impact of reducing overtime by 15%?"

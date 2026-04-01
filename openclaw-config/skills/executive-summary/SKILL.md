@@ -25,6 +25,6 @@ Follow the **Response Framework** from `SOUL.md`, tailored for briefings:
    - Headline metric (total revenue + trend direction)
    - 3-4 bullet points covering: revenue, profitability, customer satisfaction, one surprise finding
    - **Bold all key numbers**
-4. **Visual:** Generate a Mocha Dashboard or Espresso Shot chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
+4. **Visual:** Generate a Mocha Dashboard or Espresso Shot using `brew_chart` (auto-sends to Telegram)
 5. **Business Recommendation:** 1-2 actionable recommendations
 6. **Next Pour:** Suggest a deeper dive ("Want me to drill into the bottom 5 stores?")

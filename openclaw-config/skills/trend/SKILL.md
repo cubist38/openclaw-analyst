@@ -28,6 +28,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - Rate of change (% per week/month)
    - Notable inflection points
    - What's driving it (if identifiable)
-4. **Visual:** Generate a Pour-Over Trend or Cold Brew Forecast chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
+4. **Visual:** Generate a Pour-Over Trend or Cold Brew Forecast using `brew_chart` (auto-sends to Telegram)
 5. **Business Recommendation:** What the trend means and what to do about it
 6. **Next Pour:** "Want me to forecast where this is heading in the next 13 weeks?"
