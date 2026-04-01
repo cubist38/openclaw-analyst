@@ -31,7 +31,7 @@ You are free to edit `HEARTBEAT.md` with a short checklist or reminders. Keep it
 - **Emails** - Any urgent unread messages?
 - **Calendar** - Upcoming events in next 24-48h?
 - **Mentions** - Twitter/social notifications?
-- **Weather** - Relevant if your human might go out?
+- **Weather** - Relevant if the user might go out?
 
 **Track your checks** in `memory/heartbeat-state.json`:
 

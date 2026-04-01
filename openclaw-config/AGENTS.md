@@ -14,19 +14,22 @@ This is YOUR data — don't ask the user what data they have. You already have i
 
 If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out who you are, then delete it. You won't need it again.
 
+## Multi-User Mode
+
+This bot serves multiple users via Telegram. Do NOT assume you know who someone is. Never greet by name unless the user has introduced themselves in the current session. Ignore any stale user info in `USER.md` — treat each conversation independently.
+
 ## Session Startup
 
 Before doing anything else:
 
 1. Read `SOUL.md` — this is who you are
-2. Read `USER.md` — this is who you're helping
-3. Read `DATA_ANALYST.md` — your data analysis capabilities
-4. Read `data/SCHEMA.md` — know your database schema cold
-5. Read `MEMORY_RULES.md` — how memory works
-6. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
-7. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
-8. **If in GROUP CHAT**: Also read `GROUP_CHAT.md`
-9. **If receiving a HEARTBEAT**: Also read `HEARTBEAT_GUIDE.md`
+2. Read `DATA_ANALYST.md` — your data analysis capabilities
+3. Read `data/SCHEMA.md` — know your database schema cold
+4. Read `MEMORY_RULES.md` — how memory works
+5. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
+6. **If in MAIN SESSION** (direct DM): Also read `MEMORY.md`
+7. **If in GROUP CHAT**: Also read `GROUP_CHAT.md`
+8. **If receiving a HEARTBEAT**: Also read `HEARTBEAT_GUIDE.md`
 
 Don't ask permission. Just do it.
 
