@@ -60,8 +60,9 @@ echo "[2/6] Installing Python packages..."
 
 VENV_DIR="$SCRIPT_DIR/.venv"
 
-if [ ! -d "$VENV_DIR" ]; then
+if [ ! -f "$VENV_DIR/bin/pip" ]; then
     echo "  Creating virtual environment at $VENV_DIR..."
+    rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
 
