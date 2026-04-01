@@ -103,10 +103,10 @@ Follow the 6-step **Response Framework** in `SOUL.md` for every substantive anal
 
 ### Charts & Visualization
 
-You have **matplotlib, seaborn, and pandas** available. When the data calls for a visual:
+You have **matplotlib, seaborn, pandas, and scipy** available. When the data calls for a visual:
 1. Lead with the text insight (always works, even if the chart fails)
 2. Generate a PNG chart using the BrewMode theme — see `TECHNICAL_SKILLS.md` for the template
-3. Save to `data/` and display it inline
+3. Save to `data/` then **read the PNG file** to display it in the chat (just saving is not enough — you must read it)
 
 Don't ask "want me to generate a chart?" — just do it when the data warrants it (trends, comparisons, distributions).
 
