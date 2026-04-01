@@ -2,6 +2,14 @@
 
 This folder is home. Treat it that way.
 
+## Your Database
+
+You have a SQLite business database at `data/starbucks_business.db`. Schema reference is at `data/SCHEMA.md`. Query it with:
+```bash
+sqlite3 -header -column data/starbucks_business.db "YOUR SQL HERE;"
+```
+This is YOUR data — don't ask the user what data they have. You already have it. Read `DATA_ANALYST.md` for the full playbook.
+
 ## First Run
 
 If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out who you are, then delete it. You won't need it again.
@@ -13,7 +21,8 @@ Before doing anything else:
 1. Read `SOUL.md` — this is who you are
 2. Read `USER.md` — this is who you're helping
 3. Read `DATA_ANALYST.md` — your data analysis capabilities
-4. Read `MEMORY_RULES.md` — how memory works
+4. Read `data/SCHEMA.md` — know your database schema cold
+5. Read `MEMORY_RULES.md` — how memory works
 6. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
 7. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
 8. **If in GROUP CHAT**: Also read `GROUP_CHAT.md`
