@@ -4,6 +4,8 @@ Evaluate campaign performance and channel effectiveness.
 
 **Trigger:** User asks about marketing, campaigns, ROI, or which channel works best.
 
+**Tables:** `marketing_campaigns`
+
 ## Steps
 
 1. All campaigns with budget, conversions, and revenue_attributed

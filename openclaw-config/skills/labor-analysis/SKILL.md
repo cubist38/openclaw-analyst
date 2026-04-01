@@ -4,6 +4,8 @@ Analyze staffing efficiency, overtime, and labor costs.
 
 **Trigger:** User asks about staffing, overtime, labor costs, or scheduling.
 
+**Tables:** `labor_schedule`, `employees`, `daily_sales`, `financial_summary`, `stores`
+
 ## Steps
 
 1. Total hours and overtime hours by store from labor_schedule

@@ -464,9 +464,9 @@ def create_db():
         FOREIGN KEY (product_id) REFERENCES products(product_id)
     )""")
     product_sales = []
-    # Sample ~30% of stores and ~33% of products per week
-    stores_sample_size = max(1, int(NUM_STORES * 0.3))
-    products_sample_size = min(20, len(PRODUCT_CATALOG))
+    # Sample ~70% of stores and ~60% of products per week for good coverage
+    stores_sample_size = max(1, int(NUM_STORES * 0.7))
+    products_sample_size = min(36, len(PRODUCT_CATALOG))
     for week in range(NUM_WEEKS):
         ws = (DATE_START + timedelta(weeks=week)).strftime("%Y-%m-%d")
         for sid in random.sample(range(1, NUM_STORES + 1), min(stores_sample_size, NUM_STORES)):
@@ -674,7 +674,7 @@ def create_db():
                     schid += 1
     c.executemany("INSERT INTO labor_schedule VALUES (?,?,?,?,?,?,?,?)", schedule)
 
-    # ---- 15. financial_summary ----
+    # ---- 15. financial_summary (derived from daily_sales) ----
     c.execute("""CREATE TABLE financial_summary (
         month TEXT,
         store_id INTEGER,
@@ -688,19 +688,16 @@ def create_db():
         net_profit REAL,
         FOREIGN KEY (store_id) REFERENCES stores(store_id)
     )""")
+    # Aggregate daily_sales by store and month so financial_summary is consistent
+    monthly_revenue = {}
+    for ds_row in daily_sales:
+        ds_date, sid, rev = ds_row[0], ds_row[1], ds_row[2]
+        month_key = ds_date[:7]  # "YYYY-MM"
+        monthly_revenue[(month_key, sid)] = monthly_revenue.get((month_key, sid), 0) + rev
     fin = []
     for month in MONTHS:
         for sid in range(1, NUM_STORES + 1):
-            base_rev = random.uniform(90000, 200000)
-            if sid <= TOP_STORE_THRESHOLD:
-                base_rev *= 1.2
-            if sid >= STRUGGLING_STORE_START:
-                base_rev *= 0.65
-            # Growth in later months
-            month_idx = MONTHS.index(month)
-            if month_idx == len(MONTHS) - 1 and len(MONTHS) > 1:
-                base_rev *= 1.05
-            rev = round(base_rev, 2)
+            rev = round(monthly_revenue.get((month, sid), 0), 2)
             cogs = round(rev * random.uniform(0.28, 0.35), 2)
             labor = round(rev * random.uniform(0.25, 0.32), 2)
             rent = round(random.uniform(8000, 18000), 2)
@@ -885,6 +882,24 @@ def create_db():
             pricing.append((prid, pid, ed, old_p, current_price, random.choice(reasons)))
             prid += 1
     c.executemany("INSERT INTO menu_pricing_history VALUES (?,?,?,?,?,?)", pricing)
+
+    # ---- Indexes for common query patterns ----
+    c.execute("CREATE INDEX idx_daily_sales_store ON daily_sales(store_id)")
+    c.execute("CREATE INDEX idx_daily_sales_date ON daily_sales(sale_date)")
+    c.execute("CREATE INDEX idx_product_sales_product ON product_sales(product_id)")
+    c.execute("CREATE INDEX idx_product_sales_store ON product_sales(store_id)")
+    c.execute("CREATE INDEX idx_labor_schedule_store ON labor_schedule(store_id)")
+    c.execute("CREATE INDEX idx_labor_schedule_employee ON labor_schedule(employee_id)")
+    c.execute("CREATE INDEX idx_customer_orders_customer ON customer_orders(customer_id)")
+    c.execute("CREATE INDEX idx_customer_orders_store ON customer_orders(store_id)")
+    c.execute("CREATE INDEX idx_financial_summary_store ON financial_summary(store_id)")
+    c.execute("CREATE INDEX idx_financial_summary_month ON financial_summary(month)")
+    c.execute("CREATE INDEX idx_inventory_store ON inventory(store_id)")
+    c.execute("CREATE INDEX idx_waste_log_store ON waste_log(store_id)")
+    c.execute("CREATE INDEX idx_delivery_orders_store ON delivery_orders(store_id)")
+    c.execute("CREATE INDEX idx_customer_feedback_store ON customer_feedback(store_id)")
+    c.execute("CREATE INDEX idx_store_traffic_store ON store_traffic(store_id)")
+    c.execute("CREATE INDEX idx_loyalty_transactions_customer ON loyalty_transactions(customer_id)")
 
     conn.commit()
 

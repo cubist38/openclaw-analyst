@@ -6,6 +6,8 @@ Assess a store's performance and diagnose issues.
 
 **Arguments:** `[store_id or "all"]`
 
+**Tables:** `daily_sales`, `financial_summary`, `customer_feedback`, `waste_log`, `labor_schedule`, `inventory`, `stores`
+
 ## Steps
 
 1. Revenue + transaction trend for the store(s)

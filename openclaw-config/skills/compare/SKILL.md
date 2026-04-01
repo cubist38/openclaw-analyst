@@ -6,6 +6,8 @@ Side-by-side comparison of any two things.
 
 **Arguments:** `[A] vs [B]`
 
+**Tables (pick by comparison type):** `stores` + `daily_sales` (store vs store), `regional_performance` (region vs region), `products` + `product_sales` (product vs product), `marketing_campaigns` (channel vs channel), `delivery_orders` (Uber Eats vs DoorDash)
+
 ## Steps
 
 1. Identify what's being compared

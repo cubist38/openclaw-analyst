@@ -4,6 +4,8 @@ Exception reporting — find what needs attention.
 
 **Trigger:** User asks "anything unusual?", "what should I worry about?", or wants exception reporting.
 
+**Tables:** `daily_sales`, `waste_log`, `customer_feedback`, `inventory`, `delivery_orders`, `financial_summary`, `marketing_campaigns`
+
 ## Steps
 
 1. Stores with revenue >1.5 stddev below average

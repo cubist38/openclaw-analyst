@@ -22,8 +22,11 @@ echo ""
 echo "[1/5] Checking dependencies..."
 
 if ! command -v node &>/dev/null; then
-    echo "  Node.js not found. Installing via Homebrew..."
-    brew install node@24
+    echo "  ERROR: Node.js is required but not installed."
+    echo "  Install it from https://nodejs.org/ or via your package manager:"
+    echo "    macOS:  brew install node@24"
+    echo "    Linux:  curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs"
+    exit 1
 else
     echo "  Node.js: $(node -v)"
 fi

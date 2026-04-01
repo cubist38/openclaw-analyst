@@ -41,13 +41,19 @@ Violating these rules destroys trust. An honest "I don't have that data" is alwa
 
 ## How to Query
 
+First, find your database:
 ```bash
-sqlite3 -header -column data/starbucks_business.db "YOUR SQL HERE;"
+DB=$(ls data/*.db | head -1)
+```
+
+Then query it:
+```bash
+sqlite3 -header -column "$DB" "YOUR SQL HERE;"
 ```
 
 For multi-line queries:
 ```bash
-sqlite3 -header -column data/starbucks_business.db <<'SQL'
+sqlite3 -header -column "$DB" <<'SQL'
 SELECT ...
 FROM ...
 SQL
@@ -57,8 +63,8 @@ Always use `-header -column` for readability. Use `-header -csv` when output is 
 
 To check schema when unsure:
 ```bash
-sqlite3 data/starbucks_business.db ".tables"
-sqlite3 data/starbucks_business.db ".schema table_name"
+sqlite3 "$DB" ".tables"
+sqlite3 "$DB" ".schema table_name"
 ```
 
 ## Your Analytical Framework

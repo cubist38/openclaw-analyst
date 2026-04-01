@@ -57,7 +57,10 @@ EOF
     echo "[entrypoint] Config created at $CONFIG_FILE"
 else
     echo "[entrypoint] Config exists, skipping generation"
-    echo "  To reconfigure: delete the volume or edit via Control UI at http://localhost:18789"
+    echo "  NOTE: Changes to OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM,"
+    echo "  or OPENCLAW_MODEL env vars will NOT take effect until the volume is reset."
+    echo "  To reconfigure: docker compose down -v && docker compose up -d"
+    echo "  Or edit via Control UI at http://localhost:18789"
 fi
 
 # --- Set up exec approvals for sqlite3 ---

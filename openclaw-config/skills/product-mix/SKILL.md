@@ -4,6 +4,8 @@ Analyze menu performance, margins, and portfolio strategy.
 
 **Trigger:** User asks about products, menu performance, margins, bestsellers, or what to promote.
 
+**Tables:** `product_sales`, `products`, `waste_log`, `menu_pricing_history`
+
 ## Steps
 
 1. Top 10 products by revenue from product_sales

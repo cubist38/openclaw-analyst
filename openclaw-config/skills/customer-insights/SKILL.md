@@ -4,6 +4,8 @@ Analyze customer behavior, loyalty tiers, and spending patterns.
 
 **Trigger:** User asks about customers, loyalty, retention, tiers, or spending behavior.
 
+**Tables:** `customers`, `customer_orders`, `loyalty_transactions`, `delivery_orders`
+
 ## Steps
 
 1. Customer count by tier (none/green/gold)

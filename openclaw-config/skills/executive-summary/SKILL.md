@@ -4,6 +4,8 @@ Deliver a high-level business briefing.
 
 **Trigger:** User asks for an overview, summary, "how are we doing", or a briefing.
 
+**Tables:** `daily_sales`, `financial_summary`, `customer_feedback`, `stores`, `regional_performance`
+
 ## Steps
 
 1. Query total revenue, transaction count, and avg ticket for the full date range

@@ -6,6 +6,8 @@ Track how a metric changes over time.
 
 **Arguments:** `[metric]` — e.g. revenue, traffic, mobile orders, deliveries, waste
 
+**Tables (pick by metric):** `daily_sales` (revenue, mobile %), `store_traffic` (foot traffic), `delivery_orders` (deliveries), `waste_log` (waste), `product_sales` (product trends), `marketing_campaigns` (campaign timing context)
+
 ## Steps
 
 1. Identify the metric (revenue, traffic, mobile orders, deliveries, waste, etc.)
