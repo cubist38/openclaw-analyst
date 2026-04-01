@@ -26,6 +26,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - **Red flags** (needs immediate attention)
    - **Yellow flags** (worth monitoring)
    - For each flag: what, where, how bad, suggested action
-4. **Visual:** Offer a Mocha Dashboard (multi-flag overview) or Espresso Shot (outlier bars) — see `TECHNICAL_SKILLS.md`
+4. **Visual:** Generate a Mocha Dashboard or Espresso Shot chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
 5. **Business Recommendation:** Priority actions — what to fix first and why
 6. **Next Pour:** "Want me to deep-dive into any of these flags?"

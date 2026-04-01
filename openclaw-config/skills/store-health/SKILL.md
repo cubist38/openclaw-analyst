@@ -27,6 +27,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - Health score: **Strong** / **Watch** / **At Risk**
    - Key metrics in bullets with **bold numbers**
    - Root cause if underperforming (high waste? low traffic? labor issues?)
-4. **Visual:** Offer a Mocha Dashboard (multi-metric) or Espresso Shot (comparison bar) — see `TECHNICAL_SKILLS.md`
+4. **Visual:** Generate a Mocha Dashboard or Espresso Shot chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
 5. **Business Recommendation:** Specific actions to improve or maintain
 6. **Next Pour:** "Want me to compare this store against the top performer?"

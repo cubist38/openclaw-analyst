@@ -26,6 +26,6 @@ Follow the **Response Framework** from `SOUL.md`:
    - Side-by-side comparison in bullets
    - Winner and by how much
    - Caveats (sample size, confounders)
-4. **Visual:** Offer an Espresso Shot (grouped bar chart) or Latte Art Heatmap (multi-metric comparison) — see `TECHNICAL_SKILLS.md`
+4. **Visual:** Generate an Espresso Shot or Latte Art Heatmap chart, then **run `data/python3 data/send_photo.py data/<chart>.png "caption"`** to deliver it to Telegram. Do NOT skip the send step.
 5. **Business Recommendation:** What to do based on the comparison
 6. **Next Pour:** "Want me to dig into what's driving the difference?"
