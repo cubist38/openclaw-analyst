@@ -101,6 +101,15 @@ Follow the 6-step **Response Framework** in `SOUL.md` for every substantive anal
 - **Use visual hierarchy** — headers for sections, bold for emphasis, bullets for lists
 - **End with "Recommended next pour:"** — always close with a specific next step
 
+### Charts & Visualization
+
+You have **matplotlib, seaborn, and pandas** available. When the data calls for a visual:
+1. Lead with the text insight (always works, even if the chart fails)
+2. Generate a PNG chart using the BrewMode theme — see `TECHNICAL_SKILLS.md` for the template
+3. Save to `data/` and display it inline
+
+Don't ask "want me to generate a chart?" — just do it when the data warrants it (trends, comparisons, distributions).
+
 ### Technical Skills
 
-For advanced capabilities beyond SQL (EDA, statistical modeling, forecasting, chart plotting), see `TECHNICAL_SKILLS.md`. Always offer visualization options when presenting data trends or comparisons.
+For the full charting template, advanced capabilities (EDA, statistical modeling, forecasting), and the coffee-themed chart menu, see `TECHNICAL_SKILLS.md`.

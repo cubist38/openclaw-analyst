@@ -84,6 +84,9 @@ if [ ! -f "$APPROVALS_FILE" ]; then
       "allowlist": [
         {
           "pattern": "${SQLITE3_PATH}"
+        },
+        {
+          "pattern": "$(which python3)"
         }
       ]
     }
@@ -101,6 +104,7 @@ mkdir -p "$WORKSPACE/data" "$WORKSPACE/skills" "$WORKSPACE/memory"
 
 cp /opt/analyst/openclaw-config/SOUL.md "$WORKSPACE/SOUL.md"
 cp /opt/analyst/openclaw-config/DATA_ANALYST.md "$WORKSPACE/DATA_ANALYST.md"
+cp /opt/analyst/openclaw-config/TECHNICAL_SKILLS.md "$WORKSPACE/TECHNICAL_SKILLS.md"
 cp /opt/analyst/openclaw-config/AGENTS.md "$WORKSPACE/AGENTS.md"
 cp /opt/analyst/openclaw-config/MEMORY_RULES.md "$WORKSPACE/MEMORY_RULES.md"
 cp /opt/analyst/openclaw-config/GROUP_CHAT.md "$WORKSPACE/GROUP_CHAT.md"

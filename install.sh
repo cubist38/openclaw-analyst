@@ -87,6 +87,9 @@ echo "  Copied SOUL.md (analyst identity)"
 cp "$SCRIPT_DIR/openclaw-config/DATA_ANALYST.md" "$WORKSPACE/DATA_ANALYST.md"
 echo "  Copied DATA_ANALYST.md (analyst playbook)"
 
+cp "$SCRIPT_DIR/openclaw-config/TECHNICAL_SKILLS.md" "$WORKSPACE/TECHNICAL_SKILLS.md"
+echo "  Copied TECHNICAL_SKILLS.md (advanced technical skills)"
+
 cp "$SCRIPT_DIR/openclaw-config/AGENTS.md" "$WORKSPACE/AGENTS.md"
 echo "  Copied AGENTS.md (startup routine)"
 
@@ -125,6 +128,11 @@ echo "[5/5] Adding sqlite3 to exec allowlist..."
 SQLITE3_PATH="$(which sqlite3)"
 openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
     echo "  Allowlisted: $SQLITE3_PATH" || \
+    echo "  Already allowlisted or failed — check with: openclaw approvals get"
+
+PYTHON3_PATH="$(which python3)"
+openclaw approvals allowlist add "$PYTHON3_PATH" 2>/dev/null && \
+    echo "  Allowlisted: $PYTHON3_PATH (for chart generation)" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
 
 echo ""

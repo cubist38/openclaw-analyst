@@ -86,14 +86,15 @@ This single script handles everything:
 - Verifies `openclaw configure` has been run
 - Copies all config files into the OpenClaw workspace (always overwrites to stay in sync with repo)
 - Generates the Starbucks SQLite database (skips if it already exists — delete the `.db` file to regenerate)
-- Adds `sqlite3` to the exec allowlist
+- Adds `sqlite3` and `python3` to the exec allowlist
 
 **What gets installed:**
 
 | File | Destination | Purpose |
 |---|---|---|
-| `openclaw-config/SOUL.md` | `~/.openclaw/workspace/SOUL.md` | Agent identity — expert data analyst personality |
+| `openclaw-config/SOUL.md` | `~/.openclaw/workspace/SOUL.md` | Agent identity, response framework, guardrails & personality |
 | `openclaw-config/DATA_ANALYST.md` | `~/.openclaw/workspace/DATA_ANALYST.md` | Analyst playbook — framework, query guardrails, anti-hallucination rules |
+| `openclaw-config/TECHNICAL_SKILLS.md` | `~/.openclaw/workspace/TECHNICAL_SKILLS.md` | Advanced skills — EDA, modeling, forecasting, chart generation (matplotlib) |
 | `openclaw-config/AGENTS.md` | `~/.openclaw/workspace/AGENTS.md` | Startup routine — slim entry point that loads role files |
 | `openclaw-config/MEMORY_RULES.md` | `~/.openclaw/workspace/MEMORY_RULES.md` | Memory system — how to persist and curate memories |
 | `openclaw-config/GROUP_CHAT.md` | `~/.openclaw/workspace/GROUP_CHAT.md` | Group chat behavior — when to speak, reactions, formatting |
@@ -211,6 +212,7 @@ The data has intentional patterns for the bot to discover:
 
 Ask your bot things like:
 
+**Business Analysis:**
 - "What are my top 5 stores by revenue?"
 - "Which products have the highest profit margin?"
 - "Show me stores that are losing money and why"
@@ -218,9 +220,17 @@ Ask your bot things like:
 - "What's our marketing ROI by channel?"
 - "Which stores have the most overtime?"
 - "What are customers complaining about?"
-- "Show me inventory items below reorder point"
 - "How do gold members behave differently from green?"
 - "Give me a full Q1 executive summary"
+
+**Advanced Analytics (Technical Skills):**
+- "Forecast revenue for the next 13 weeks with confidence intervals"
+- "Run an A/B test analysis on our email vs social campaigns"
+- "Show me a correlation heatmap of all store metrics"
+- "What if we raise prices 5% — model the revenue impact"
+- "Brew me a pour-over trend of mobile order adoption"
+- "Give me a cold brew forecast with best/worst case scenarios"
+- "Which stores are statistical outliers and why?"
 
 ## Project Structure
 
@@ -235,12 +245,13 @@ openclaw-analyst/
 ├── install.sh                  # Local setup (copies configs, generates DB, sets permissions)
 ├── create_db.sh                # Generate the SQLite database only
 ├── generate_starbucks_db.py    # Python data generation logic (21 tables, config-driven)
-├── requirements.txt            # Python dependencies (pyyaml)
+├── requirements.txt            # Python dependencies (pyyaml, pandas, matplotlib, seaborn)
 ├── configs/
 │   └── config.yaml             # Database generation config (stores, regions, date range, etc.)
 ├── openclaw-config/            # Bot persona & analyst config files
-│   ├── SOUL.md                 # Agent identity (expert data analyst)
+│   ├── SOUL.md                 # Agent identity, response framework, guardrails & personality
 │   ├── DATA_ANALYST.md         # Analyst playbook (framework, query guardrails, anti-hallucination)
+│   ├── TECHNICAL_SKILLS.md     # Advanced skills (EDA, modeling, forecasting, charting, tools)
 │   ├── AGENTS.md               # Startup routine — slim entry point that loads other files
 │   ├── MEMORY_RULES.md         # Memory system (daily logs, long-term memory, write-it-down rules)
 │   ├── GROUP_CHAT.md           # Group chat behavior (when to speak, reactions, formatting)
@@ -268,9 +279,10 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
 ├── exec-approvals.json         # Exec permissions (sqlite3 allowlist)
 └── workspace/
     ├── AGENTS.md               # Startup routine (slim — references other files)
-    ├── SOUL.md                 # Agent identity (expert data analyst)
+    ├── SOUL.md                 # Agent identity, response framework, guardrails & personality
     ├── USER.md                 # User profile
     ├── DATA_ANALYST.md         # Analyst playbook (framework, query guardrails)
+    ├── TECHNICAL_SKILLS.md     # Advanced skills (EDA, modeling, forecasting, charting, tools)
     ├── MEMORY_RULES.md         # Memory system (daily logs, long-term memory)
     ├── GROUP_CHAT.md           # Group chat behavior (loaded only in group context)
     ├── HEARTBEAT_GUIDE.md      # Heartbeat system (loaded only on heartbeat)
@@ -286,18 +298,20 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
 ## How It Works
 
 1. **OpenClaw gateway** runs and connects to Telegram via bot token
-2. When you message the bot, the agent reads its workspace files (`SOUL.md`, `DATA_ANALYST.md`, etc.) to understand its role
+2. When you message the bot, the agent reads its workspace files (`SOUL.md`, `DATA_ANALYST.md`, `TECHNICAL_SKILLS.md`, etc.) to understand its role
 3. The agent runs `sqlite3` queries against the database to answer your questions
-4. It delivers insights with recommendations, not just raw numbers
+4. For visual analysis, the agent generates Python scripts with matplotlib/seaborn, renders PNG charts, and displays them inline in Telegram
+5. It delivers insights with recommendations, not just raw numbers
 
 ### How OpenClaw Workspace Files Relate
 
 ```
 AGENTS.md (entry point — slim startup routine)
   │
-  ├── reads SOUL.md            → WHO the bot is (identity, personality)
+  ├── reads SOUL.md            → WHO the bot is (identity, response framework, guardrails)
   ├── reads USER.md            → WHO it's helping (your profile)
   ├── reads DATA_ANALYST.md    → WHAT it does (analyst playbook + query guardrails)
+  ├── reads TECHNICAL_SKILLS.md → HOW it levels up (EDA, modeling, forecasting, charting)
   ├── reads skills/*/SKILL.md  → HOW it analyzes (9 analytical skills)
   ├── reads MEMORY_RULES.md    → HOW memory works (always loaded)
   ├── reads memory/            → WHAT it remembers (daily logs)
@@ -309,8 +323,9 @@ AGENTS.md (entry point — slim startup routine)
 | File | Purpose | Customizable? |
 |---|---|---|
 | `AGENTS.md` | Startup sequence, red lines | Rarely — core OpenClaw behavior |
-| `SOUL.md` | Identity & personality | Yes — swap for different persona |
+| `SOUL.md` | Identity, response framework & guardrails | Yes — swap for different persona |
 | `DATA_ANALYST.md` | Analyst playbook + query guardrails | Yes — replace for different use case |
+| `TECHNICAL_SKILLS.md` | Advanced skills (EDA, modeling, forecasting, charting) | Yes — add/remove capabilities |
 | `skills/*/SKILL.md` | Analytical skills (9 skills) | Yes — add/remove/edit skill folders |
 | `MEMORY_RULES.md` | Memory system rules | Rarely — how the bot persists context |
 | `GROUP_CHAT.md` | Group chat behavior | Yes — tune when/how bot participates |
@@ -354,6 +369,7 @@ openclaw agents add analyst-group \
 # Copy config files to the new workspace
 cp openclaw-config/SOUL.md ~/.openclaw/workspace-group/SOUL.md
 cp openclaw-config/DATA_ANALYST.md ~/.openclaw/workspace-group/DATA_ANALYST.md
+cp openclaw-config/TECHNICAL_SKILLS.md ~/.openclaw/workspace-group/TECHNICAL_SKILLS.md
 cp openclaw-config/AGENTS.md ~/.openclaw/workspace-group/AGENTS.md
 cp openclaw-config/MEMORY_RULES.md ~/.openclaw/workspace-group/MEMORY_RULES.md
 cp openclaw-config/GROUP_CHAT.md ~/.openclaw/workspace-group/GROUP_CHAT.md
@@ -421,6 +437,7 @@ The OpenClaw web UI is available at `http://localhost:18789` when the container 
 | `Unknown model: x-ai/grok-code-fast-1` | Run `openclaw configure` and pick a valid model (e.g. `x-ai/grok-3-fast`) |
 | `already running under launchd` | Run `openclaw daemon stop` first |
 | Bot doesn't query the database | Check `openclaw approvals get` — sqlite3 must be in the allowlist |
+| Bot can't generate charts | Check `openclaw approvals get` — python3 must be in the allowlist. Re-run `install.sh` to fix |
 | Telegram `Could not resolve @username` | Use your numeric user ID instead (get it from @userinfobot) |
 | Bot replies but with no data insights | Restart the gateway so it picks up the new workspace files |
 

@@ -2,9 +2,11 @@ FROM ghcr.io/openclaw/openclaw:latest
 
 USER root
 
-# Install Python 3, pip, and sqlite3
+# Install Python 3, pip, sqlite3, and system deps for matplotlib rendering
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip sqlite3 && \
+    apt-get install -y --no-install-recommends \
+        python3 python3-pip sqlite3 \
+        libfreetype6 libpng16-16 libfontconfig1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy project files
