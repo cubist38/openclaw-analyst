@@ -19,7 +19,14 @@ Assess a store's performance and diagnose issues.
 
 ## Output Format
 
-- Health score: Strong / Watch / At Risk
-- Key metrics in bullets
-- Root cause if underperforming (high waste? low traffic? labor issues?)
-- Recommendation
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "Checking the health of Store #X — one diagnostic brew coming up."
+2. **Data Used:** Tables queried + date range + any assumptions
+3. **Key Insights:**
+   - Health score: **Strong** / **Watch** / **At Risk**
+   - Key metrics in bullets with **bold numbers**
+   - Root cause if underperforming (high waste? low traffic? labor issues?)
+4. **Visual:** Offer a Mocha Dashboard (multi-metric) or Espresso Shot (comparison bar) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** Specific actions to improve or maintain
+6. **Next Pour:** "Want me to compare this store against the top performer?"

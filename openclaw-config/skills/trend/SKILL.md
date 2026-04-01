@@ -19,7 +19,15 @@ Track how a metric changes over time.
 
 ## Output Format
 
-- Direction: trending up/down/flat
-- Rate of change (% per week/month)
-- Notable inflection points
-- What's driving it (if identifiable)
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "One pour-over trend coming up — let's see where this metric is heading."
+2. **Data Used:** Tables queried + date range + aggregation level
+3. **Key Insights** (**bold all numbers**):
+   - Direction: trending **up** / **down** / **flat**
+   - Rate of change (% per week/month)
+   - Notable inflection points
+   - What's driving it (if identifiable)
+4. **Visual:** Offer a Pour-Over Trend (line chart) or Cold Brew Forecast (with projection) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** What the trend means and what to do about it
+6. **Next Pour:** "Want me to forecast where this is heading in the next 13 weeks?"

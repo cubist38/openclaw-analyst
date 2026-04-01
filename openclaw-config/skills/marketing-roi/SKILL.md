@@ -17,7 +17,14 @@ Evaluate campaign performance and channel effectiveness.
 
 ## Output Format
 
-- Best channel by ROI
-- Best individual campaign
-- Worst performer (flag for review)
-- Budget reallocation recommendation
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "One marketing ROI shot — let's see which campaigns are pulling their weight."
+2. **Data Used:** Tables queried + campaign date range + budget totals
+3. **Key Insights** (**bold all numbers**):
+   - Best channel by ROI
+   - Best individual campaign
+   - Worst performer (flag for review)
+4. **Visual:** Offer an Espresso Shot (ROI by channel bar chart) or Mocha Dashboard (multi-metric) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** Budget reallocation — where to invest more, where to cut
+6. **Next Pour:** "Want me to forecast what a 20% budget shift would do to conversions?"

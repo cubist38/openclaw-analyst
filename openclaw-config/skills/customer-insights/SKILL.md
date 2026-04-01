@@ -17,7 +17,14 @@ Analyze customer behavior, loyalty tiers, and spending patterns.
 
 ## Output Format
 
-- Tier comparison table (bullet format)
-- Key finding: how gold members differ
-- Conversion opportunity: green to gold potential
-- Recommendation for loyalty program
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "Brewing up your customer insights — let's see who's loyal."
+2. **Data Used:** Tables queried + customer count + date range
+3. **Key Insights** (**bold all numbers**):
+   - Tier comparison (bullet format — no tables on Telegram)
+   - Key finding: how gold members differ
+   - Conversion opportunity: green to gold potential
+4. **Visual:** Offer a Cappuccino Cohort (retention heatmap) or Espresso Shot (tier comparison) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** Loyalty program actions — who to target, how to convert
+6. **Next Pour:** "Want me to identify the customers most likely to upgrade to Gold?"

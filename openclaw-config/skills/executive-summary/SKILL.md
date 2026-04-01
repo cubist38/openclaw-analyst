@@ -17,6 +17,14 @@ Deliver a high-level business briefing.
 
 ## Output Format
 
-- Headline metric (total revenue + trend direction)
-- 3-4 bullet points covering: revenue, profitability, customer satisfaction, one surprise finding
-- Close with 1-2 actionable recommendations
+Follow the **Response Framework** from `SOUL.md`, tailored for briefings:
+
+1. **Order Confirmation:** "One executive brew coming right up — here's your business overview."
+2. **Data Used:** List tables queried and date range
+3. **Key Insights:**
+   - Headline metric (total revenue + trend direction)
+   - 3-4 bullet points covering: revenue, profitability, customer satisfaction, one surprise finding
+   - **Bold all key numbers**
+4. **Visual:** Offer a Mocha Dashboard (multi-panel) or Espresso Shot (bar chart) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** 1-2 actionable recommendations
+6. **Next Pour:** Suggest a deeper dive ("Want me to drill into the bottom 5 stores?")

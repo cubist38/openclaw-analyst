@@ -18,6 +18,14 @@ Exception reporting — find what needs attention.
 
 ## Output Format
 
-- Red flags (needs immediate attention)
-- Yellow flags (worth monitoring)
-- For each flag: what, where, how bad, suggested action
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "Running the anomaly scan — let's find what needs your attention."
+2. **Data Used:** Tables scanned + thresholds used + date range
+3. **Key Insights** (**bold all numbers**):
+   - **Red flags** (needs immediate attention)
+   - **Yellow flags** (worth monitoring)
+   - For each flag: what, where, how bad, suggested action
+4. **Visual:** Offer a Mocha Dashboard (multi-flag overview) or Espresso Shot (outlier bars) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** Priority actions — what to fix first and why
+6. **Next Pour:** "Want me to deep-dive into any of these flags?"

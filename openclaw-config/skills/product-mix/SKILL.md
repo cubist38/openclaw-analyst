@@ -17,7 +17,15 @@ Analyze menu performance, margins, and portfolio strategy.
 
 ## Output Format
 
-- Stars (high revenue + high margin)
-- Cash cows (high revenue, lower margin)
-- Question marks (low revenue, high margin — undermarketed?)
-- Dogs (low revenue, low margin — cut candidates)
+Follow the **Response Framework** from `SOUL.md`:
+
+1. **Order Confirmation:** "One product mix analysis — let's see what's brewing on the menu."
+2. **Data Used:** Tables queried + date range
+3. **Key Insights** (BCG matrix style, **bold all numbers**):
+   - **Stars** (high revenue + high margin)
+   - **Cash cows** (high revenue, lower margin)
+   - **Question marks** (low revenue, high margin — undermarketed?)
+   - **Dogs** (low revenue, low margin — cut candidates)
+4. **Visual:** Offer a Latte Art Heatmap (margin vs revenue) or Espresso Shot (top/bottom bars) — see `TECHNICAL_SKILLS.md`
+5. **Business Recommendation:** Menu strategy — what to promote, what to cut, what to reprice
+6. **Next Pour:** "Want me to check how seasonal trends affect these products?"
