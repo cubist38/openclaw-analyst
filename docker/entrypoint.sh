@@ -114,6 +114,7 @@ cp /opt/analyst/openclaw-config/GROUP_CHAT.md "$WORKSPACE/GROUP_CHAT.md"
 cp /opt/analyst/openclaw-config/HEARTBEAT_GUIDE.md "$WORKSPACE/HEARTBEAT_GUIDE.md"
 cp -r /opt/analyst/openclaw-config/skills/* "$WORKSPACE/skills/"
 cp /opt/analyst/openclaw-config/data/SCHEMA.md "$WORKSPACE/data/SCHEMA.md"
+cp /opt/analyst/openclaw-config/data/send_photo.py "$WORKSPACE/data/send_photo.py"
 
 # --- Symlink python3 into workspace (matches local install) ---
 ln -sf "$(which python3)" "$WORKSPACE/data/python3"

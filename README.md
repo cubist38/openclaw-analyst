@@ -268,7 +268,8 @@ openclaw-analyst/
 │   │   ├── trend/
 │   │   └── compare/
 │   └── data/
-│       └── SCHEMA.md           # Database schema reference & relationships
+│       ├── SCHEMA.md           # Database schema reference & relationships
+│       └── send_photo.py       # Telegram Bot API image sender (stdlib only)
 └── .gitignore
 ```
 
@@ -294,6 +295,7 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
     └── data/
         ├── starbucks_business.db   # SQLite database (configurable size)
         ├── python3                 # Symlink to venv python3 (has charting libs)
+        ├── send_photo.py           # Telegram Bot API image sender
         └── SCHEMA.md               # Full schema reference & relationships
 ```
 
@@ -302,7 +304,7 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
 1. **OpenClaw gateway** runs and connects to Telegram via bot token
 2. When you message the bot, the agent reads its workspace files (`SOUL.md`, `DATA_ANALYST.md`, `TECHNICAL_SKILLS.md`, etc.) to understand its role
 3. The agent runs `sqlite3` queries against the database to answer your questions
-4. For visual analysis, the agent generates Python scripts with matplotlib/seaborn, renders PNG charts, and displays them inline in Telegram
+4. For visual analysis, the agent generates PNG charts with matplotlib/seaborn (BrewMode theme) and sends them directly to Telegram via Bot API (`send_photo.py`)
 5. It delivers insights with recommendations, not just raw numbers
 
 ### How OpenClaw Workspace Files Relate

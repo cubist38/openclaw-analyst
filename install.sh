@@ -130,6 +130,9 @@ echo "  Copied skills/ (9 analyst skills)"
 cp "$SCRIPT_DIR/openclaw-config/data/SCHEMA.md" "$WORKSPACE/data/SCHEMA.md"
 echo "  Copied data/SCHEMA.md (database schema)"
 
+cp "$SCRIPT_DIR/openclaw-config/data/send_photo.py" "$WORKSPACE/data/send_photo.py"
+echo "  Copied data/send_photo.py (Telegram image sender)"
+
 echo ""
 
 # --- Step 5: Generate database (skip if already exists) ---
