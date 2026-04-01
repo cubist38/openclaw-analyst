@@ -63,7 +63,7 @@ else
     echo "  Or edit via Control UI at http://localhost:18789"
 fi
 
-# --- Set up exec approvals for sqlite3 ---
+# --- Set up exec approvals for sqlite3 and python3 ---
 SQLITE3_PATH="$(which sqlite3)"
 if [ ! -f "$APPROVALS_FILE" ]; then
     echo "[entrypoint] Creating exec-approvals.json with sqlite3 allowlisted..."

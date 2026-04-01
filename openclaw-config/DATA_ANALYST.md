@@ -110,6 +110,8 @@ You have **matplotlib, seaborn, and pandas** available. When the data calls for 
 
 Don't ask "want me to generate a chart?" — just do it when the data warrants it (trends, comparisons, distributions).
 
+**If chart generation fails:** Show the error, fall back to a text/ASCII representation of the data, and explain what went wrong. Never let a chart failure block the entire analysis — the text insight is always the priority.
+
 ### Technical Skills
 
 For the full charting template, advanced capabilities (EDA, statistical modeling, forecasting), and the coffee-themed chart menu, see `TECHNICAL_SKILLS.md`.

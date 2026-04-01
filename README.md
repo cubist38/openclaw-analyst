@@ -83,10 +83,11 @@ bash install.sh
 
 This single script handles everything:
 - Checks that Node.js, Python 3, sqlite3, and OpenClaw are installed
+- Creates a Python virtual environment (`.venv/`) and installs pandas, matplotlib, seaborn
 - Verifies `openclaw configure` has been run
 - Copies all config files into the OpenClaw workspace (always overwrites to stay in sync with repo)
 - Generates the Starbucks SQLite database (skips if it already exists — delete the `.db` file to regenerate)
-- Adds `sqlite3` and `python3` to the exec allowlist
+- Adds `sqlite3` and `python3` to the exec allowlist and symlinks `data/python3` to the venv
 
 **What gets installed:**
 
@@ -245,7 +246,7 @@ openclaw-analyst/
 ├── install.sh                  # Local setup (copies configs, generates DB, sets permissions)
 ├── create_db.sh                # Generate the SQLite database only
 ├── generate_starbucks_db.py    # Python data generation logic (21 tables, config-driven)
-├── requirements.txt            # Python dependencies (pyyaml, pandas, matplotlib, seaborn)
+├── requirements.txt            # Python dependencies (pyyaml, pandas, matplotlib, seaborn, scipy)
 ├── configs/
 │   └── config.yaml             # Database generation config (stores, regions, date range, etc.)
 ├── openclaw-config/            # Bot persona & analyst config files
@@ -276,7 +277,7 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
 ```
 ~/.openclaw/
 ├── openclaw.json               # Main config (model, Telegram, gateway)
-├── exec-approvals.json         # Exec permissions (sqlite3 allowlist)
+├── exec-approvals.json         # Exec permissions (sqlite3 + python3 allowlist)
 └── workspace/
     ├── AGENTS.md               # Startup routine (slim — references other files)
     ├── SOUL.md                 # Agent identity, response framework, guardrails & personality
@@ -292,6 +293,7 @@ OpenClaw workspace files (created by `openclaw configure` + this project):
     ├── memory/                 # Daily logs (one file per day)
     └── data/
         ├── starbucks_business.db   # SQLite database (configurable size)
+        ├── python3                 # Symlink to venv python3 (has charting libs)
         └── SCHEMA.md               # Full schema reference & relationships
 ```
 
@@ -404,7 +406,7 @@ Each agent has its own workspace, memory, and session state — no race conditio
 
 The `openclaw-data` Docker volume persists all state at `/home/node/.openclaw/`:
 - `openclaw.json` — gateway config (auto-generated on first run)
-- `exec-approvals.json` — sqlite3 allowlist (auto-generated)
+- `exec-approvals.json` — sqlite3 + python3 allowlist (auto-generated)
 - `workspace/` — agent workspace, memory, and database
 
 Config files (AGENTS.md, SOUL.md, etc.) are re-copied from the image on every start to stay in sync. The database is only generated once.

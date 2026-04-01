@@ -67,7 +67,7 @@ if [ ! -f "$VENV_DIR/bin/pip" ]; then
 fi
 
 "$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt" && \
-    echo "  Installed: pyyaml, pandas, matplotlib, seaborn" || \
+    echo "  Installed: pyyaml, pandas, matplotlib, seaborn, scipy" || \
     { echo "  ERROR: Failed to install Python packages."; exit 1; }
 
 # Use the venv python for all subsequent steps and for the bot's exec allowlist
@@ -154,7 +154,7 @@ openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
 
 # Allowlist both the venv python3 (has charting libs) and system python3 (fallback)
 openclaw approvals allowlist add "$PYTHON3" 2>/dev/null && \
-    echo "  Allowlisted: $PYTHON3 (venv — has pandas, matplotlib, seaborn)" || \
+    echo "  Allowlisted: $PYTHON3 (venv — has pandas, matplotlib, seaborn, scipy)" || \
     echo "  Already allowlisted or failed — check with: openclaw approvals get"
 
 SYSTEM_PYTHON3="$(which python3)"
