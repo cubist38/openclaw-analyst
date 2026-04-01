@@ -3,10 +3,11 @@
 # Usage: bash install.sh
 #
 # This script:
-# 1. Installs Node.js and OpenClaw CLI (if not installed)
-# 2. Copies analyst config files into the OpenClaw workspace
-# 3. Generates the Starbucks SQLite database
-# 4. Adds sqlite3 to the exec allowlist
+# 1. Checks dependencies (Node.js, Python 3, sqlite3, OpenClaw)
+# 2. Installs Python packages (pandas, matplotlib, seaborn)
+# 3. Copies analyst config files into the OpenClaw workspace
+# 4. Generates the Starbucks SQLite database
+# 5. Adds sqlite3 and python3 to the exec allowlist
 #
 # Prerequisites: run `openclaw configure` first to set up API key and Telegram
 
@@ -19,7 +20,7 @@ echo "=== OpenClaw Business Analyst Bot Setup ==="
 echo ""
 
 # --- Step 1: Check dependencies ---
-echo "[1/5] Checking dependencies..."
+echo "[1/6] Checking dependencies..."
 
 if ! command -v node &>/dev/null; then
     echo "  ERROR: Node.js is required but not installed."
@@ -54,8 +55,17 @@ fi
 
 echo ""
 
-# --- Step 2: Check OpenClaw is configured ---
-echo "[2/5] Checking OpenClaw configuration..."
+# --- Step 2: Install Python packages ---
+echo "[2/6] Installing Python packages..."
+
+pip3 install --quiet -r "$SCRIPT_DIR/requirements.txt" && \
+    echo "  Installed: pyyaml, pandas, matplotlib, seaborn" || \
+    { echo "  ERROR: Failed to install Python packages. Try: pip3 install -r requirements.txt"; exit 1; }
+
+echo ""
+
+# --- Step 3: Check OpenClaw is configured ---
+echo "[3/6] Checking OpenClaw configuration..."
 
 if [ ! -f "$HOME/.openclaw/openclaw.json" ]; then
     echo ""
@@ -76,8 +86,8 @@ fi
 echo "  Workspace: $WORKSPACE"
 echo ""
 
-# --- Step 3: Copy config files ---
-echo "[3/5] Installing analyst configuration files..."
+# --- Step 4: Copy config files ---
+echo "[4/6] Installing analyst configuration files..."
 
 mkdir -p "$WORKSPACE/data"
 
@@ -110,8 +120,8 @@ echo "  Copied data/SCHEMA.md (database schema)"
 
 echo ""
 
-# --- Step 4: Generate database (skip if already exists) ---
-echo "[4/5] Generating Starbucks business database..."
+# --- Step 5: Generate database (skip if already exists) ---
+echo "[5/6] Generating Starbucks business database..."
 
 DB_FILE="$WORKSPACE/data/starbucks_business.db"
 if [ -f "$DB_FILE" ]; then
@@ -122,8 +132,8 @@ else
 fi
 echo ""
 
-# --- Step 5: Allowlist sqlite3 ---
-echo "[5/5] Adding sqlite3 to exec allowlist..."
+# --- Step 6: Allowlist sqlite3 and python3 ---
+echo "[6/6] Adding sqlite3 and python3 to exec allowlist..."
 
 SQLITE3_PATH="$(which sqlite3)"
 openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
