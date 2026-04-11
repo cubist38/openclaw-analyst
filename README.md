@@ -392,6 +392,107 @@ This gives you:
 
 Each agent has its own workspace, memory, and session state — no race conditions.
 
+## Channels
+
+The analyst bot can be reached over Telegram, Zalo, or both at the same time. Each channel is configured independently — pick whichever fits your audience.
+
+### Telegram
+
+The default channel. Most quick-start instructions in this README assume Telegram.
+
+**1. Get a bot token**
+
+- Message [@BotFather](https://t.me/BotFather) on Telegram and create a new bot
+- Copy the token it gives you
+
+**2. Get your numeric user ID**
+
+Message [@userinfobot](https://t.me/userinfobot) — it replies with your numeric ID (e.g. `123456789`). Use this for `allowFrom`, **not** your `@username` (the username resolver often fails).
+
+**3. Configure**
+
+Run `openclaw configure` and enter the bot token and numeric user ID when prompted. For Docker, set these in `.env`:
+
+```bash
+TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
+TELEGRAM_ALLOW_FROM=123456789
+```
+
+**4. Restart the gateway** and message your bot.
+
+**Charts on Telegram:** `brew_chart.py` and `send_photo.py` deliver matplotlib PNGs via the Telegram Bot API automatically.
+
+### Zalo
+
+[Zalo](https://docs.openclaw.ai/channels/zalo) is Vietnam's dominant messaging app. The Zalo plugin ships bundled with current OpenClaw releases.
+
+**1. Get a bot token**
+
+- Sign in at [bot.zaloplatforms.com](https://bot.zaloplatforms.com)
+- Create a new bot and copy its token (format: `numeric_id:secret`)
+
+**2. Configure the channel**
+
+Add the Zalo block to `~/.openclaw/openclaw.json` (or set the env var below):
+
+```json5
+{
+  channels: {
+    zalo: {
+      enabled: true,
+      accounts: {
+        default: {
+          botToken: "123456789:abc-xyz",
+          dmPolicy: "pairing",
+          // Or skip pairing and whitelist numeric user IDs directly:
+          // allowFrom: ["987654321"]
+        },
+      },
+    },
+  },
+}
+```
+
+Or via environment variable (Docker: add to `.env`):
+
+```bash
+ZALO_BOT_TOKEN=123456789:abc-xyz
+```
+
+For older OpenClaw builds without the plugin bundled:
+
+```bash
+openclaw plugins install @openclaw/zalo
+```
+
+**3. Restart the gateway**
+
+```bash
+openclaw daemon stop && openclaw gateway run
+```
+
+**4. Pair your account**
+
+With `dmPolicy: "pairing"`, message the bot once on Zalo — you'll get a one-time code. Approve it from the host:
+
+```bash
+openclaw pairing approve zalo <CODE>
+```
+
+**5. Send a test message**
+
+```bash
+openclaw message send --channel zalo --target <user_id> --message "hi"
+```
+
+**Limits to be aware of:**
+- Outbound text is capped at **2000 characters** (Zalo API limit) — streaming is disabled
+- Media uploads are capped by `mediaMaxMb` (default `5`)
+- Image/sticker/voice/file support is unreliable on Marketplace bots
+- Group chats are not supported for Marketplace bots
+
+> **Charts on Zalo:** `brew_chart.py` and `send_photo.py` currently target the Telegram Bot API only. To deliver charts through Zalo you'll need a Zalo-equivalent uploader and must keep images under the 5 MB cap.
+
 ## Docker Details
 
 ### Environment Variables
