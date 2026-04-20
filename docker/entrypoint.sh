@@ -1,36 +1,53 @@
 #!/bin/bash
+# Docker entrypoint — provisions the 4-agent Brewlytics stack on first boot
+# then starts the OpenClaw gateway.
+#
+# Agents:
+#   main            → concierge (Telegram-bound, routes to specialists)
+#   analyst         → descriptive BI
+#   data-scientist  → forecasting, stats, anomalies
+#   customer-intel  → loyalty, retention, segmentation
+#
+# One shared SQLite DB lives at ~/.openclaw/shared-data/starbucks_business.db
+# and is symlinked into each specialist workspace.
+
 set -e
 
 OPENCLAW_DIR="${HOME}/.openclaw"
-WORKSPACE="${OPENCLAW_DIR}/workspace"
+SHARED_DATA_DIR="${OPENCLAW_DIR}/shared-data"
+SHARED_DB="${SHARED_DATA_DIR}/starbucks_business.db"
+
+CONCIERGE_WS="${OPENCLAW_DIR}/workspace"            # default 'main' agent
+ANALYST_WS="${OPENCLAW_DIR}/workspace-analyst"
+DS_WS="${OPENCLAW_DIR}/workspace-ds"
+CUSTOMER_WS="${OPENCLAW_DIR}/workspace-customer"
+
 CONFIG_FILE="${OPENCLAW_DIR}/openclaw.json"
 APPROVALS_FILE="${OPENCLAW_DIR}/exec-approvals.json"
+CONFIG_SRC="/opt/analyst/openclaw-config"
+
+SQLITE3_PATH="$(which sqlite3)"
+PYTHON3_PATH="$(which python3)"
+
+# --- Validate required env ---
+for var in OPENROUTER_API_KEY TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
+    if [ -z "${!var}" ]; then
+        echo "ERROR: $var is required"
+        exit 1
+    fi
+done
+
+MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
 
 # --- Generate openclaw.json if missing ---
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[entrypoint] No openclaw.json found — generating from environment..."
 
-    if [ -z "$OPENROUTER_API_KEY" ]; then
-        echo "ERROR: OPENROUTER_API_KEY is required"
-        exit 1
-    fi
-    if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-        echo "ERROR: TELEGRAM_BOT_TOKEN is required"
-        exit 1
-    fi
-    if [ -z "$TELEGRAM_ALLOW_FROM" ]; then
-        echo "ERROR: TELEGRAM_ALLOW_FROM is required (comma-separated numeric user IDs)"
-        exit 1
-    fi
-
-    # Build allowFrom array from comma-separated IDs
     ALLOW_JSON=$(python3 -c "
 import os, json
 ids = [f'tg:{uid.strip()}' for uid in os.environ['TELEGRAM_ALLOW_FROM'].split(',') if uid.strip()]
 print(json.dumps(ids))
 ")
-
-    MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
 
     cat > "$CONFIG_FILE" << EOF
 {
@@ -40,7 +57,19 @@ print(json.dumps(ids))
   "agents": {
     "defaults": {
       "model": "${MODEL}",
-      "workspace": "${WORKSPACE}"
+      "workspace": "${CONCIERGE_WS}"
+    },
+    "analyst": {
+      "model": "${MODEL}",
+      "workspace": "${ANALYST_WS}"
+    },
+    "data-scientist": {
+      "model": "${MODEL}",
+      "workspace": "${DS_WS}"
+    },
+    "customer-intel": {
+      "model": "${MODEL}",
+      "workspace": "${CUSTOMER_WS}"
     }
   },
   "channels": {
@@ -60,13 +89,27 @@ else
     echo "  NOTE: Changes to OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM,"
     echo "  or OPENCLAW_MODEL env vars will NOT take effect until the volume is reset."
     echo "  To reconfigure: docker compose down -v && docker compose up -d"
-    echo "  Or edit via Control UI at http://localhost:18789"
 fi
 
-# --- Set up exec approvals for sqlite3 and python3 ---
-SQLITE3_PATH="$(which sqlite3)"
+# --- Also register specialists via the CLI (belt-and-suspenders with openclaw.json) ---
+# If openclaw reads agents purely from openclaw.json this is a no-op; if it needs
+# an explicit 'agents add', this covers it. Either way, second run is idempotent.
+for entry in "analyst:${ANALYST_WS}" "data-scientist:${DS_WS}" "customer-intel:${CUSTOMER_WS}"; do
+    name="${entry%%:*}"
+    ws="${entry##*:}"
+    if ! openclaw agents list 2>/dev/null | grep -q " $name "; then
+        openclaw agents add "$name" --workspace "$ws" --model "$MODEL" 2>/dev/null \
+            && echo "[entrypoint] Registered agent '$name'" \
+            || echo "[entrypoint] 'openclaw agents add $name' failed (may already exist)"
+    fi
+done
+
+# --- Per-agent exec approvals ---
+# Concierge gets ONLY the specialist invoker wrapper. No raw openclaw, no sqlite3,
+# no python3 — concierge doesn't analyze, it routes.
+# Specialists get sqlite3 + python3 + their own data/python3 symlink.
 if [ ! -f "$APPROVALS_FILE" ]; then
-    echo "[entrypoint] Creating exec-approvals.json with sqlite3 allowlisted..."
+    echo "[entrypoint] Creating per-agent exec-approvals.json..."
     cat > "$APPROVALS_FILE" << EOF
 {
   "version": 1,
@@ -82,53 +125,116 @@ if [ ! -f "$APPROVALS_FILE" ]; then
       "askFallback": "deny",
       "autoAllowSkills": true,
       "allowlist": [
-        {
-          "pattern": "${SQLITE3_PATH}"
-        },
-        {
-          "pattern": "$(which python3)"
-        },
-        {
-          "pattern": "${WORKSPACE}/data/python3"
-        }
+        { "pattern": "${CONCIERGE_WS}/invoke-specialist.sh" }
+      ]
+    },
+    "analyst": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${ANALYST_WS}/data/python3" }
+      ]
+    },
+    "data-scientist": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${DS_WS}/data/python3" }
+      ]
+    },
+    "customer-intel": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${CUSTOMER_WS}/data/python3" }
       ]
     }
   }
 }
 EOF
-    echo "[entrypoint] Allowlisted: $SQLITE3_PATH"
+    echo "[entrypoint] Approvals written"
 else
     echo "[entrypoint] Exec approvals exist, skipping creation"
 fi
 
-# --- Copy workspace files (always overwrite to stay in sync) ---
-echo "[entrypoint] Setting up workspace files..."
-mkdir -p "$WORKSPACE/data" "$WORKSPACE/skills" "$WORKSPACE/memory"
-
-cp /opt/analyst/openclaw-config/SOUL.md "$WORKSPACE/SOUL.md"
-cp /opt/analyst/openclaw-config/DATA_ANALYST.md "$WORKSPACE/DATA_ANALYST.md"
-cp /opt/analyst/openclaw-config/TECHNICAL_SKILLS.md "$WORKSPACE/TECHNICAL_SKILLS.md"
-cp /opt/analyst/openclaw-config/AGENTS.md "$WORKSPACE/AGENTS.md"
-cp /opt/analyst/openclaw-config/MEMORY_RULES.md "$WORKSPACE/MEMORY_RULES.md"
-cp /opt/analyst/openclaw-config/GROUP_CHAT.md "$WORKSPACE/GROUP_CHAT.md"
-cp /opt/analyst/openclaw-config/HEARTBEAT_GUIDE.md "$WORKSPACE/HEARTBEAT_GUIDE.md"
-cp -r /opt/analyst/openclaw-config/skills/* "$WORKSPACE/skills/"
-cp /opt/analyst/openclaw-config/data/SCHEMA.md "$WORKSPACE/data/SCHEMA.md"
-cp /opt/analyst/openclaw-config/data/send_photo.py "$WORKSPACE/data/send_photo.py"
-cp /opt/analyst/openclaw-config/data/brew_chart.py "$WORKSPACE/data/brew_chart.py"
-
-# --- Symlink python3 into workspace (matches local install) ---
-ln -sf "$(which python3)" "$WORKSPACE/data/python3"
-echo "[entrypoint] Linked: $WORKSPACE/data/python3 -> $(which python3)"
-
-# --- Generate database if missing ---
-DB_FILE="$WORKSPACE/data/starbucks_business.db"
-if [ ! -f "$DB_FILE" ]; then
+# --- Generate shared DB if missing ---
+mkdir -p "$SHARED_DATA_DIR"
+if [ ! -f "$SHARED_DB" ]; then
     echo "[entrypoint] Generating Starbucks database..."
+    # Generator writes to ~/.openclaw/workspace/data/ by default; we move it.
+    mkdir -p "$CONCIERGE_WS/data"
     python3 /opt/analyst/generate_starbucks_db.py
+    mv "$CONCIERGE_WS/data/starbucks_business.db" "$SHARED_DB"
+    # Clean up the empty data/ dir — concierge doesn't need one.
+    rmdir "$CONCIERGE_WS/data" 2>/dev/null || true
+    echo "[entrypoint] DB at $SHARED_DB"
 else
-    echo "[entrypoint] Database exists, skipping generation"
+    echo "[entrypoint] DB exists, skipping generation"
 fi
+
+# --- Concierge workspace (the 'main' agent) ---
+# No DB, no DATA_ANALYST.md, no skills — just routing + persona + memory rules.
+echo "[entrypoint] Installing concierge workspace..."
+mkdir -p "$CONCIERGE_WS/memory"
+cp "$CONFIG_SRC/shared/BRAND.md"                       "$CONCIERGE_WS/BRAND.md"
+cp "$CONFIG_SRC/shared/MEMORY_RULES.md"                "$CONCIERGE_WS/MEMORY_RULES.md"
+cp "$CONFIG_SRC/agents/concierge/SOUL.md"              "$CONCIERGE_WS/SOUL.md"
+cp "$CONFIG_SRC/agents/concierge/AGENTS.md"            "$CONCIERGE_WS/AGENTS.md"
+cp "$CONFIG_SRC/agents/concierge/ROUTING.md"           "$CONCIERGE_WS/ROUTING.md"
+cp "$CONFIG_SRC/agents/concierge/GROUP_CHAT.md"        "$CONCIERGE_WS/GROUP_CHAT.md"
+cp "$CONFIG_SRC/agents/concierge/HEARTBEAT_GUIDE.md"   "$CONCIERGE_WS/HEARTBEAT_GUIDE.md"
+cp "$CONFIG_SRC/shared/invoke-specialist.sh"           "$CONCIERGE_WS/invoke-specialist.sh"
+chmod +x "$CONCIERGE_WS/invoke-specialist.sh"
+
+# --- Specialist workspace installer ---
+install_specialist() {
+    local agent_dir="$1"
+    local workspace="$2"
+    local extra_file="$3"  # optional, e.g. TECHNICAL_SKILLS.md
+
+    mkdir -p "$workspace/data" "$workspace/memory"
+
+    # Shared files (BRAND, DATA_ANALYST, MEMORY_RULES, SCHEMA, chart helpers)
+    cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"
+    cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$workspace/DATA_ANALYST.md"
+    cp "$CONFIG_SRC/shared/MEMORY_RULES.md"     "$workspace/MEMORY_RULES.md"
+    cp "$CONFIG_SRC/shared/data/SCHEMA.md"      "$workspace/data/SCHEMA.md"
+    cp "$CONFIG_SRC/shared/data/brew_chart.py"  "$workspace/data/brew_chart.py"
+    cp "$CONFIG_SRC/shared/data/send_photo.py"  "$workspace/data/send_photo.py"
+
+    # Agent-specific
+    cp "$CONFIG_SRC/agents/$agent_dir/SOUL.md"   "$workspace/SOUL.md"
+    cp "$CONFIG_SRC/agents/$agent_dir/AGENTS.md" "$workspace/AGENTS.md"
+
+    if [ -n "$extra_file" ]; then
+        cp "$CONFIG_SRC/agents/$agent_dir/$extra_file" "$workspace/$extra_file"
+    fi
+
+    # Skills — wipe + copy so removed skills actually go away
+    rm -rf "$workspace/skills"
+    cp -r "$CONFIG_SRC/agents/$agent_dir/skills" "$workspace/skills"
+
+    # Symlink the shared DB + python3 into the workspace
+    ln -sf "$SHARED_DB"     "$workspace/data/starbucks_business.db"
+    ln -sf "$PYTHON3_PATH"  "$workspace/data/python3"
+}
+
+echo "[entrypoint] Installing specialist workspaces..."
+install_specialist "analyst"        "$ANALYST_WS"   ""
+install_specialist "data-scientist" "$DS_WS"        "TECHNICAL_SKILLS.md"
+install_specialist "customer-intel" "$CUSTOMER_WS"  ""
 
 echo "[entrypoint] Setup complete. Starting gateway..."
 exec node dist/index.js gateway run

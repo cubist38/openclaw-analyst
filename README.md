@@ -1,137 +1,178 @@
-# OpenClaw Business Analyst Bot
+# 🦞 Brewlytics — Multi-Agent Business Analyst
 
-An [OpenClaw](https://openclaw.com) agent configured as an expert Starbucks business data analyst. It queries a SQLite database with 20+ tables of realistic business data and delivers insights via Telegram.
+A team of four [OpenClaw](https://openclaw.com) agents that collaborate to answer business questions on a synthetic Starbucks database. A Telegram-bound **concierge** receives every message and routes to the right specialist — descriptive **analyst**, predictive **data-scientist**, or **customer-intel** — then relays the answer back.
+
+Each agent has its own isolated workspace, its own memory, and a scoped exec allowlist. See *[Security via NemoClaw](#security-via-nemoclaw)* for optional kernel-level sandboxing on top.
+
+## Architecture
+
+```
+                   ┌────────────────────────────┐
+                   │  Telegram user              │
+                   └────────────┬────────────────┘
+                                │
+                   ┌────────────▼────────────────┐
+                   │  CONCIERGE  (main agent)     │  binds: telegram
+                   │  greets, routes, relays      │  allowlist: invoke-specialist.sh
+                   │  no SQL · no Python · no DB  │
+                   └────────────┬────────────────┘
+                                │  invoke-specialist.sh <agent> <session> <msg>
+                   ┌────────────┼────────────┐
+                   │            │            │
+          ┌────────▼──────┐ ┌───▼──────────┐ ┌▼──────────────────┐
+          │  ANALYST       │ │ DATA-        │ │ CUSTOMER-INTEL    │
+          │  descriptive   │ │ SCIENTIST    │ │ loyalty / CLV /   │
+          │  BI            │ │ forecasts,   │ │ retention          │
+          │                │ │ stats,       │ │                    │
+          │  6 skills      │ │ anomalies    │ │ 1 skill            │
+          │                │ │ 2 skills     │ │                    │
+          └────────┬───────┘ └──────┬───────┘ └──────┬─────────────┘
+                   │                │                │
+                   └────────────────┼────────────────┘
+                                    │
+                          ┌─────────▼──────────┐
+                          │  shared SQLite DB   │
+                          │  (symlinked in)     │
+                          └─────────────────────┘
+```
+
+### Agents
+
+| Agent | Role | Skills | Channel | Exec allowlist |
+|---|---|---|---|---|
+| **concierge** (`main`) | Front-desk router | — | Telegram | `invoke-specialist.sh` only |
+| **analyst** | Descriptive BI | executive-summary, store-health, product-mix, marketing-roi, labor-analysis, compare | none (CLI-only) | sqlite3, python3 |
+| **data-scientist** | Forecasts, stats, anomalies | trend, anomaly-scan | none | sqlite3, python3 |
+| **customer-intel** | Loyalty, retention, CLV | customer-insights | none | sqlite3, python3 |
+
+### Routing flow
+
+1. User messages the Telegram bot
+2. The concierge reads the message and either answers inline (trivia, greetings) or picks a specialist from `ROUTING.md`
+3. It runs `./invoke-specialist.sh <agent> <session-id> <message>` — a locked-down wrapper around `openclaw agent --agent X --local`
+4. The specialist queries the DB, runs analysis, generates charts (which `brew_chart.send()` pushes straight to Telegram), and writes its response to stdout
+5. The concierge relays that response verbatim
+
+One delegation per user turn. The specialist suggests a "Next Pour" — the user can follow up if they want depth in another domain.
+
+### Security model
+
+- **Concierge has no SQL, Python, or shell access.** Its only allowlisted executable is `invoke-specialist.sh`, which accepts exactly three specialist names and exactly the one-turn `--local -m` form. A compromised concierge cannot reconfigure OpenClaw, reach other agents arbitrarily, or run shell commands.
+- **Specialists have no channel binding.** They can't read Telegram directly — they only run when the concierge invokes them. A rogue specialist can't exfiltrate via chat.
+- **Each agent has its own workspace** (`~/.openclaw/workspace-{analyst,ds,customer}`). Memory races between specialists are impossible.
+- **Single shared DB** (`~/.openclaw/shared-data/starbucks_business.db`) symlinked into each specialist. One source of truth, no drift.
 
 ## Prerequisites
 
-- macOS (Homebrew)
-- Python 3.10+
-- Node.js 24+
+- Linux (tested) or macOS
+- Docker + Docker Compose (recommended) — or Node.js 22+ / Python 3.10+ / sqlite3 for a local install
 - An [OpenRouter](https://openrouter.ai) API key
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram numeric user ID (message [@userinfobot](https://t.me/userinfobot) to get it)
 
-## Quick Start (Docker)
+## Quick Start (Docker — recommended)
 
 ```bash
 git clone https://github.com/cubist38/openclaw-analyst.git
-
 cd openclaw-analyst
 
-# 1. Create your .env file (never commit this file — it contains secrets)
 cp .env.example .env
-# Edit .env with your API key, Telegram bot token, and user ID
+# Edit .env with OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM
 
-# 2. Start the bot
 docker compose up -d
 ```
 
-Then open Telegram, message your bot, and ask: **"What are my top 5 stores by revenue?"**
+On first boot the container:
 
-The container handles everything: installs dependencies, generates the database, configures OpenClaw, and starts the gateway.
+- Generates `openclaw.json` with all 4 agents (concierge + 3 specialists)
+- Writes a per-agent `exec-approvals.json` (concierge: wrapper-only; specialists: `sqlite3` + `python3`)
+- Generates the shared SQLite DB once at `~/.openclaw/shared-data/`
+- Populates each of the 4 workspaces with the right files
+- Starts the gateway
 
-> **Tip:** Get your Telegram numeric user ID from [@userinfobot](https://t.me/userinfobot) — use this for `TELEGRAM_ALLOW_FROM`, not your `@username`.
+Then message your Telegram bot: **"What are my top 5 stores by revenue?"** — the concierge routes it to `analyst`.
+
+> **Tip:** Use your numeric Telegram user ID for `TELEGRAM_ALLOW_FROM` — the username resolver is unreliable. Get it from [@userinfobot](https://t.me/userinfobot).
 
 ## Quick Start (Local)
 
 ```bash
 git clone https://github.com/cubist38/openclaw-analyst.git
-
 cd openclaw-analyst
 
-# 1. Configure OpenClaw (interactive — sets up API key + Telegram bot)
+# 1. Configure OpenClaw — creates the default 'main' agent and binds Telegram
 openclaw configure
 
-# 2. Install everything (config files, database, permissions)
+# 2. Install — provisions 3 specialist agents + populates all 4 workspaces
 bash install.sh
 
-# 3. Start the bot
+# 3. Start
 openclaw gateway run
 ```
 
-> **Tip:** When prompted for Telegram `allowFrom` during `openclaw configure`, enter your **numeric user ID** (e.g. `123456789`), not your `@username`. Get it from [@userinfobot](https://t.me/userinfobot).
+`install.sh` is idempotent: re-run it to resync workspace files from the repo. It backs up `exec-approvals.json` before overwriting (security config — never silently replaced).
 
-## Step-by-Step Setup
+## Project Structure
 
-If you prefer to understand each step, or if the quick start doesn't work:
-
-### 1. Install dependencies
-
-```bash
-bash setup.sh
+```
+openclaw-analyst/
+├── README.md
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
+├── docker/
+│   └── entrypoint.sh             # multi-agent provisioning on first boot
+├── install.sh                    # local install path
+├── generate_starbucks_db.py      # synthetic DB generator (21 tables)
+├── configs/config.yaml           # DB generation settings
+├── requirements.txt
+└── openclaw-config/
+    ├── shared/                     # files used by more than one agent
+    │   ├── BRAND.md                    # voice + universal rules ("Brewlytics")
+    │   ├── DATA_ANALYST.md             # query discipline + response framework
+    │   ├── MEMORY_RULES.md
+    │   ├── invoke-specialist.sh        # concierge's locked-down wrapper
+    │   └── data/
+    │       ├── SCHEMA.md
+    │       ├── brew_chart.py           # chart helper (auto-sends PNGs)
+    │       └── send_photo.py
+    └── agents/
+        ├── concierge/                  # Telegram-bound router ('main')
+        │   ├── SOUL.md, AGENTS.md
+        │   ├── ROUTING.md              # when and how to delegate
+        │   ├── GROUP_CHAT.md, HEARTBEAT_GUIDE.md
+        ├── analyst/                    # descriptive BI
+        │   ├── SOUL.md, AGENTS.md
+        │   └── skills/{executive-summary, store-health, product-mix,
+        │               marketing-roi, labor-analysis, compare}/
+        ├── data-scientist/             # forecasts, stats, anomalies
+        │   ├── SOUL.md, AGENTS.md
+        │   ├── TECHNICAL_SKILLS.md     # EDA, modeling, forecasting, charts
+        │   └── skills/{trend, anomaly-scan}/
+        └── customer-intel/             # loyalty, retention, CLV
+            ├── SOUL.md, AGENTS.md
+            └── skills/customer-insights/
 ```
 
-Installs Node.js 24 (via Homebrew) and the OpenClaw CLI globally.
+On disk after install:
 
-### 2. Configure OpenClaw
-
-```bash
-openclaw configure
+```
+~/.openclaw/
+├── openclaw.json                 # 4 agents + Telegram + gateway
+├── exec-approvals.json           # per-agent allowlists
+├── shared-data/
+│   └── starbucks_business.db     # canonical DB
+├── workspace/                    # concierge (main)
+├── workspace-analyst/            # analyst
+├── workspace-ds/                 # data-scientist
+└── workspace-customer/           # customer-intel
 ```
 
-Follow the prompts to set up:
-- **OpenRouter** API key and model (e.g. `x-ai/grok-3-fast`)
-- **Telegram** bot token and allowed user ID
-
-> **Note:** When prompted for Telegram `allowFrom`, enter your **numeric user ID** (e.g. `123456789`), not your `@username`. The username resolver often fails.
-
-### 3. Run the install script
-
-```bash
-bash install.sh
-```
-
-This single script handles everything:
-- Checks that Node.js, Python 3, sqlite3, and OpenClaw are installed
-- Creates a Python virtual environment (`.venv/`) and installs pandas, matplotlib, seaborn
-- Verifies `openclaw configure` has been run
-- Copies all config files into the OpenClaw workspace (always overwrites to stay in sync with repo)
-- Generates the Starbucks SQLite database (skips if it already exists — delete the `.db` file to regenerate)
-- Adds `sqlite3` and `python3` to the exec allowlist and symlinks `data/python3` to the venv
-
-**What gets installed:**
-
-| File | Destination | Purpose |
-|---|---|---|
-| `openclaw-config/SOUL.md` | `~/.openclaw/workspace/SOUL.md` | Agent identity, response framework, guardrails & personality |
-| `openclaw-config/DATA_ANALYST.md` | `~/.openclaw/workspace/DATA_ANALYST.md` | Analyst playbook — framework, query guardrails, anti-hallucination rules |
-| `openclaw-config/TECHNICAL_SKILLS.md` | `~/.openclaw/workspace/TECHNICAL_SKILLS.md` | Advanced skills — EDA, modeling, forecasting, chart generation (matplotlib) |
-| `openclaw-config/AGENTS.md` | `~/.openclaw/workspace/AGENTS.md` | Startup routine — slim entry point that loads role files |
-| `openclaw-config/MEMORY_RULES.md` | `~/.openclaw/workspace/MEMORY_RULES.md` | Memory system — how to persist and curate memories |
-| `openclaw-config/GROUP_CHAT.md` | `~/.openclaw/workspace/GROUP_CHAT.md` | Group chat behavior — when to speak, reactions, formatting |
-| `openclaw-config/HEARTBEAT_GUIDE.md` | `~/.openclaw/workspace/HEARTBEAT_GUIDE.md` | Heartbeat system — proactive checks and background work |
-| `openclaw-config/skills/` | `~/.openclaw/workspace/skills/` | Analyst skills (9 skills, one `SKILL.md` per folder) |
-| `openclaw-config/data/SCHEMA.md` | `~/.openclaw/workspace/data/SCHEMA.md` | Database schema reference |
-| _(generated)_ | `~/.openclaw/workspace/data/starbucks_business.db` | SQLite database with 21 tables |
-
-> **Note:** Config files always overwrite the workspace copies to stay in sync with the repo. The database is only generated once — to regenerate, delete `~/.openclaw/workspace/data/starbucks_business.db` and re-run `install.sh`.
-
-### 4. Start the bot
-
-**Foreground** (see logs directly):
-
-```bash
-openclaw gateway run
-```
-
-**Background** (as a daemon):
-
-```bash
-openclaw daemon start
-```
-
-To stop: `openclaw daemon stop`
-To restart: `openclaw daemon stop && openclaw gateway run`
-
-> **Note:** If you see `already running under launchd`, stop the daemon first with `openclaw daemon stop`, then run `openclaw gateway run`.
-
-### 5. Chat with your bot
-
-Open Telegram, find your bot, and start asking business questions.
+Each specialist workspace contains its own `SOUL.md`, `AGENTS.md`, `BRAND.md`, `DATA_ANALYST.md`, `MEMORY_RULES.md`, skills/, and a `data/` dir with `SCHEMA.md`, `brew_chart.py`, `send_photo.py`, `python3` (symlink), and `starbucks_business.db` (symlink to the canonical DB).
 
 ## Database Overview
 
-The database simulates a Starbucks operation with entirely **synthetic data** — no real customer or business information is used. With the default config, it generates 50 stores across 6 US regions for Q1 2026 — but all of this is configurable via `configs/config.yaml`.
+Synthetic Starbucks business data — **no real customer or business information**. The default config generates 50 stores across 6 US regions for Q1 2026. Everything is configurable via `configs/config.yaml`.
 
 | Table | Default Rows | Description |
 |---|---|---|
@@ -141,21 +182,21 @@ The database simulates a Starbucks operation with entirely **synthetic data** �
 | employees | ~250 | Baristas, shift supervisors, store managers, district managers |
 | customers | 200 | Rewards members with tiers (none/green/gold) |
 | suppliers | 20 | Supply chain partners (beans, dairy, syrups, food, packaging) |
-| daily_sales | 4,500 | Daily revenue per store (stores x days in range) |
+| daily_sales | 4,500 | Daily revenue per store |
 | product_sales | 3,900 | Weekly product-level sales by store |
 | customer_orders | ~1,700 | Individual orders with payment method and mobile flag |
 | loyalty_transactions | ~1,300 | Stars earned/redeemed by rewards members |
 | labor_schedule | ~15,000 | Shift records with overtime tracking |
 | store_traffic | 9,100 | Hourly foot traffic with conversion rates |
-| inventory | 2,400 | Monthly stock snapshots (months x stores x 16 items) |
-| financial_summary | 150 | Monthly P&L by store (revenue, COGS, labor, rent, etc.) |
-| customer_feedback | 200 | Ratings (1-5) by category (service/quality/speed/cleanliness/app) |
-| marketing_campaigns | 15 | Campaigns across email/social/in-store/app (filtered to date range) |
-| waste_log | ~660 | Product waste by reason (expired/damaged/overproduction/quality) |
-| delivery_orders | ~500 | Uber Eats / DoorDash orders with delivery time and ratings |
-| training_records | ~360 | Employee training completions with scores |
-| regional_performance | 12 | YoY regional comparison (auto-generated from date range) |
-| menu_pricing_history | ~100 | Historical price changes with reasons |
+| inventory | 2,400 | Monthly stock snapshots |
+| financial_summary | 150 | Monthly P&L by store |
+| customer_feedback | 200 | Ratings (1-5) by category |
+| marketing_campaigns | 15 | Campaigns across email/social/in-store/app |
+| waste_log | ~660 | Product waste by reason |
+| delivery_orders | ~500 | Uber Eats / DoorDash orders |
+| training_records | ~360 | Employee training completions |
+| regional_performance | 12 | YoY regional comparison |
+| menu_pricing_history | ~100 | Historical price changes |
 
 ### Configuring the Database
 
@@ -163,277 +204,101 @@ Edit `configs/config.yaml` to control what gets generated:
 
 ```yaml
 seed: 42                    # Random seed for reproducibility
-num_stores: 50              # Number of store locations
-num_customers: 200          # Number of rewards customers
-num_feedback: 200           # Number of feedback entries
+num_stores: 50
+num_customers: 200
+num_feedback: 200
 
 employees_per_store:
   baristas_min: 2
   baristas_max: 4
 
 date_range:
-  start: "2026-01-01"      # Any start date
-  end: "2026-03-31"        # Any end date — even multi-year
+  start: "2026-01-01"
+  end: "2026-03-31"
 
-regions:                    # Add/remove regions and cities
+regions:
   - name: Pacific_NW
     cities:
-      - city: Seattle
-        state: WA
+      - { city: Seattle, state: WA }
       # ...
 ```
 
-**Key points:**
-- **Date range** can span any duration — weeks, months, or years. All transactional tables (daily_sales, orders, deliveries, labor, inventory, financials) adapt automatically.
-- **Regions and cities** are fully configurable. Add new regions or remove existing ones.
-- **Store performance thresholds** scale proportionally — top 20% are high performers, bottom 10% are struggling.
-- **`db_path`** can override the output location if you want to generate the database elsewhere.
-
-After editing the config, delete the existing database and re-run:
+After editing, regenerate:
 
 ```bash
-rm ~/.openclaw/workspace/data/starbucks_business.db
-bash install.sh
+rm ~/.openclaw/shared-data/starbucks_business.db
+bash install.sh          # local
+# or
+docker compose restart   # docker (wipes only the DB; workspaces stay)
 ```
 
 ### Built-in Data Patterns
 
-The data has intentional patterns for the bot to discover:
-
-- **Top 20% of stores** perform ~20% above average (top performers)
-- **Bottom 10% of stores** perform ~30% below average (struggling, higher waste, worse feedback)
-- **Seasonal products** (PSL, Peppermint Mocha, Gingerbread) decline over the date range
+- **Top 20% of stores** perform ~20% above average
+- **Bottom 10% of stores** perform ~30% below average (higher waste, worse feedback)
+- **Seasonal products** (PSL, Peppermint Mocha, Gingerbread) decline across the date range
 - **Weekend spikes** in revenue, Monday dips
-- **Growth trend** ~5% uplift in the last third of the date range
-- **Mobile orders** trend upward over time
-- **Delivery volume** grows over time
-- **Gold tier customers** order 3-5x more frequently than non-members
+- **~5% growth uplift** in the last third of the date range
+- **Mobile orders** trend upward
+- **Gold-tier customers** order 3–5× more frequently than non-members
 
 ## Example Questions
 
-Ask your bot things like:
-
-**Business Analysis:**
+**Descriptive (→ analyst):**
 - "What are my top 5 stores by revenue?"
 - "Which products have the highest profit margin?"
 - "Show me stores that are losing money and why"
-- "Compare Uber Eats vs DoorDash — which is better?"
-- "What's our marketing ROI by channel?"
+- "Compare Uber Eats vs DoorDash"
 - "Which stores have the most overtime?"
-- "What are customers complaining about?"
-- "How do gold members behave differently from green?"
 - "Give me a full Q1 executive summary"
 
-**Advanced Analytics (Technical Skills):**
+**Predictive / inferential (→ data-scientist):**
 - "Forecast revenue for the next 13 weeks with confidence intervals"
-- "Run an A/B test analysis on our email vs social campaigns"
+- "Run an A/B test analysis on email vs social campaigns"
 - "Show me a correlation heatmap of all store metrics"
 - "What if we raise prices 5% — model the revenue impact"
-- "Brew me a pour-over trend of mobile order adoption"
-- "Give me a cold brew forecast with best/worst case scenarios"
 - "Which stores are statistical outliers and why?"
 
-## Project Structure
+**Customer-side (→ customer-intel):**
+- "How do gold members behave differently from green?"
+- "Who are our top 10 customers by lifetime spend?"
+- "What's the green-to-gold conversion opportunity?"
 
-```
-openclaw-analyst/
-├── README.md                   # This file
-├── Dockerfile                  # Docker image build
-├── docker-compose.yml          # Docker Compose setup
-├── .env.example                # Environment variables template
-├── docker/
-│   └── entrypoint.sh           # Container startup script
-├── install.sh                  # Local setup (copies configs, generates DB, sets permissions)
-├── create_db.sh                # Generate the SQLite database only
-├── generate_starbucks_db.py    # Python data generation logic (21 tables, config-driven)
-├── requirements.txt            # Python dependencies (pyyaml, pandas, matplotlib, seaborn, scipy)
-├── configs/
-│   └── config.yaml             # Database generation config (stores, regions, date range, etc.)
-├── openclaw-config/            # Bot persona & analyst config files
-│   ├── SOUL.md                 # Agent identity, response framework, guardrails & personality
-│   ├── DATA_ANALYST.md         # Analyst playbook (framework, query guardrails, anti-hallucination)
-│   ├── TECHNICAL_SKILLS.md     # Advanced skills (EDA, modeling, forecasting, charting, tools)
-│   ├── AGENTS.md               # Startup routine — slim entry point that loads other files
-│   ├── MEMORY_RULES.md         # Memory system (daily logs, long-term memory, write-it-down rules)
-│   ├── GROUP_CHAT.md           # Group chat behavior (when to speak, reactions, formatting)
-│   ├── HEARTBEAT_GUIDE.md      # Heartbeat system (proactive checks, cron vs heartbeat)
-│   ├── skills/                 # Analyst skills (one SKILL.md per folder)
-│   │   ├── executive-summary/
-│   │   ├── store-health/
-│   │   ├── product-mix/
-│   │   ├── customer-insights/
-│   │   ├── marketing-roi/
-│   │   ├── labor-analysis/
-│   │   ├── anomaly-scan/
-│   │   ├── trend/
-│   │   └── compare/
-│   └── data/
-│       ├── SCHEMA.md           # Database schema reference & relationships
-│       ├── brew_chart.py       # Chart helper — BrewMode theme + auto-send to Telegram
-│       └── send_photo.py       # Telegram Bot API image sender (stdlib only)
-└── .gitignore
-```
+## Using Your Own Dataset
 
-OpenClaw workspace files (created by `openclaw configure` + this project):
+The agents are dataset-agnostic. To swap in your own:
 
-```
-~/.openclaw/
-├── openclaw.json               # Main config (model, Telegram, gateway)
-├── exec-approvals.json         # Exec permissions (sqlite3 + python3 allowlist)
-└── workspace/
-    ├── AGENTS.md               # Startup routine (slim — references other files)
-    ├── SOUL.md                 # Agent identity, response framework, guardrails & personality
-    ├── USER.md                 # User profile
-    ├── DATA_ANALYST.md         # Analyst playbook (framework, query guardrails)
-    ├── TECHNICAL_SKILLS.md     # Advanced skills (EDA, modeling, forecasting, charting, tools)
-    ├── MEMORY_RULES.md         # Memory system (daily logs, long-term memory)
-    ├── GROUP_CHAT.md           # Group chat behavior (loaded only in group context)
-    ├── HEARTBEAT_GUIDE.md      # Heartbeat system (loaded only on heartbeat)
-    ├── skills/                 # Analyst skills (one SKILL.md per folder)
-    ├── TOOLS.md                # Environment-specific notes
-    ├── MEMORY.md               # Curated long-term memory (main session only)
-    ├── memory/                 # Daily logs (one file per day)
-    └── data/
-        ├── starbucks_business.db   # SQLite database (configurable size)
-        ├── python3                 # Symlink to venv python3 (has charting libs)
-        ├── brew_chart.py           # Chart helper — BrewMode theme + auto-send to Telegram
-        ├── send_photo.py           # Telegram Bot API image sender
-        └── SCHEMA.md               # Full schema reference & relationships
-```
-
-## How It Works
-
-1. **OpenClaw gateway** runs and connects to Telegram via bot token
-2. When you message the bot, the agent reads its workspace files (`SOUL.md`, `DATA_ANALYST.md`, `TECHNICAL_SKILLS.md`, etc.) to understand its role
-3. The agent runs `sqlite3` queries against the database to answer your questions
-4. For visual analysis, the agent generates PNG charts with matplotlib/seaborn (BrewMode theme) using `brew_chart.py`, which automatically sends them to Telegram via Bot API
-5. It delivers insights with recommendations, not just raw numbers
-
-### How OpenClaw Workspace Files Relate
-
-```
-AGENTS.md (entry point — slim startup routine)
-  │
-  ├── reads SOUL.md            → WHO the bot is (identity, response framework, guardrails)
-  ├── reads USER.md            → WHO it's helping (your profile)
-  ├── reads DATA_ANALYST.md    → WHAT it does (analyst playbook + query guardrails)
-  ├── reads TECHNICAL_SKILLS.md → HOW it levels up (EDA, modeling, forecasting, charting)
-  ├── reads skills/*/SKILL.md  → HOW it analyzes (9 analytical skills)
-  ├── reads MEMORY_RULES.md    → HOW memory works (always loaded)
-  ├── reads memory/            → WHAT it remembers (daily logs)
-  ├── reads MEMORY.md          → Long-term memory (main session only)
-  ├── reads GROUP_CHAT.md      → Group behavior (group chats only)
-  └── reads HEARTBEAT_GUIDE.md → Proactive checks (heartbeats only)
-```
-
-| File | Purpose | Customizable? |
-|---|---|---|
-| `AGENTS.md` | Startup sequence, red lines | Rarely — core OpenClaw behavior |
-| `SOUL.md` | Identity, response framework & guardrails | Yes — swap for different persona |
-| `DATA_ANALYST.md` | Analyst playbook + query guardrails | Yes — replace for different use case |
-| `TECHNICAL_SKILLS.md` | Advanced skills (EDA, modeling, forecasting, charting) | Yes — add/remove capabilities |
-| `skills/*/SKILL.md` | Analytical skills (9 skills) | Yes — add/remove/edit skill folders |
-| `MEMORY_RULES.md` | Memory system rules | Rarely — how the bot persists context |
-| `GROUP_CHAT.md` | Group chat behavior | Yes — tune when/how bot participates |
-| `HEARTBEAT_GUIDE.md` | Proactive checks & background work | Yes — configure what to monitor |
-| `data/SCHEMA.md` | Database schema reference | Yes — auto-generated if missing |
-| `TOOLS.md` | Environment notes (SSH, devices, etc.) | Per machine |
-| `USER.md` | Info about the human | Per user |
-| `MEMORY.md` | Curated long-term memory | Bot maintains this itself |
-
-### Using Your Own Dataset
-
-You don't need the Starbucks data. To use your own:
-
-1. Place your `.db` file in `~/.openclaw/workspace/data/`
-2. (Optional) Write a `data/SCHEMA.md` describing your tables — if you skip this, the bot will auto-discover the schema on first session and create `SCHEMA.md` itself
-3. `SOUL.md` and `DATA_ANALYST.md` are generic — they work with any SQLite database
-
-### Multi-User / Group Chat Setup
-
-By default, the bot uses a single agent (`main`) with one shared workspace. This works fine for 1-on-1 DMs, but **group chats with multiple people can cause race conditions** when the bot writes to shared files like `MEMORY.md` or daily logs.
-
-**How sessions work:**
-
-| Session type | Example | Reads MEMORY.md? | Write-safe? |
-|---|---|---|---|
-| Main session | Your Telegram DM | Yes | Yes (single user) |
-| Group chat | Telegram group | No | Risk of conflicts |
-| Cron job | Scheduled task | No | Risk of conflicts |
-
-**Solution: isolate agents per context**
-
-Create a separate agent for group chats with its own workspace:
-
-```bash
-# Create a group chat agent with isolated workspace
-openclaw agents add analyst-group \
-  --workspace ~/.openclaw/workspace-group \
-  --model openrouter/x-ai/grok-3-fast \
-  --bind telegram:group
-
-# Copy config files to the new workspace
-cp openclaw-config/SOUL.md ~/.openclaw/workspace-group/SOUL.md
-cp openclaw-config/DATA_ANALYST.md ~/.openclaw/workspace-group/DATA_ANALYST.md
-cp openclaw-config/TECHNICAL_SKILLS.md ~/.openclaw/workspace-group/TECHNICAL_SKILLS.md
-cp openclaw-config/AGENTS.md ~/.openclaw/workspace-group/AGENTS.md
-cp openclaw-config/MEMORY_RULES.md ~/.openclaw/workspace-group/MEMORY_RULES.md
-cp openclaw-config/GROUP_CHAT.md ~/.openclaw/workspace-group/GROUP_CHAT.md
-cp openclaw-config/HEARTBEAT_GUIDE.md ~/.openclaw/workspace-group/HEARTBEAT_GUIDE.md
-cp -r openclaw-config/skills ~/.openclaw/workspace-group/skills
-mkdir -p ~/.openclaw/workspace-group/data
-cp ~/.openclaw/workspace/data/starbucks_business.db ~/.openclaw/workspace-group/data/
-cp openclaw-config/data/SCHEMA.md ~/.openclaw/workspace-group/data/SCHEMA.md
-```
-
-This gives you:
-- `main` agent → your private DM (full memory access)
-- `analyst-group` agent → group chats (isolated workspace, no conflicts)
-
-Each agent has its own workspace, memory, and session state — no race conditions.
+1. Put your `.db` file at `~/.openclaw/shared-data/starbucks_business.db` (or edit the symlink targets in each workspace)
+2. (Optional) Replace `openclaw-config/shared/data/SCHEMA.md` with your schema reference — if you skip this, the agents will auto-discover on first session
+3. `SOUL.md` and `DATA_ANALYST.md` are generic SQL playbooks — they work with any SQLite DB. You may want to edit skills to match your domain.
 
 ## Channels
 
-The analyst bot can be reached over Telegram, Zalo, or both at the same time. Each channel is configured independently — pick whichever fits your audience.
-
 ### Telegram
 
-The default channel. Most quick-start instructions in this README assume Telegram.
+The default channel, bound to the **concierge** only. Specialists never see Telegram directly.
 
-**1. Get a bot token**
+**Setup:**
+1. Get a bot token from [@BotFather](https://t.me/BotFather)
+2. Get your numeric user ID from [@userinfobot](https://t.me/userinfobot)
+3. Set `.env`:
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
+   TELEGRAM_ALLOW_FROM=123456789
+   ```
+4. Restart the container (or gateway)
 
-- Message [@BotFather](https://t.me/BotFather) on Telegram and create a new bot
-- Copy the token it gives you
-
-**2. Get your numeric user ID**
-
-Message [@userinfobot](https://t.me/userinfobot) — it replies with your numeric ID (e.g. `123456789`). Use this for `allowFrom`, **not** your `@username` (the username resolver often fails).
-
-**3. Configure**
-
-Run `openclaw configure` and enter the bot token and numeric user ID when prompted. For Docker, set these in `.env`:
-
-```bash
-TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
-TELEGRAM_ALLOW_FROM=123456789
-```
-
-**4. Restart the gateway** and message your bot.
-
-**Charts on Telegram:** `brew_chart.py` and `send_photo.py` deliver matplotlib PNGs via the Telegram Bot API automatically.
+Charts generated by specialists go directly to Telegram via `brew_chart.send()` — they don't route through the concierge. This is intentional: the concierge doesn't see images either (reducing its attack surface).
 
 ### Zalo
 
-[Zalo](https://docs.openclaw.ai/channels/zalo) is Vietnam's dominant messaging app. The Zalo plugin ships bundled with current OpenClaw releases.
+[Zalo](https://docs.openclaw.ai/channels/zalo) is Vietnam's dominant messaging app and ships as a bundled OpenClaw plugin. To add it, bind the concierge to zalo:
 
-**1. Get a bot token**
+```bash
+openclaw agents bind main --channel zalo:default
+```
 
-- Sign in at [bot.zaloplatforms.com](https://bot.zaloplatforms.com)
-- Create a new bot and copy its token (format: `numeric_id:secret`)
-
-**2. Configure the channel**
-
-Add the Zalo block to `~/.openclaw/openclaw.json` (or set the env var below):
+Add the Zalo block to `~/.openclaw/openclaw.json`:
 
 ```json5
 {
@@ -443,55 +308,32 @@ Add the Zalo block to `~/.openclaw/openclaw.json` (or set the env var below):
       accounts: {
         default: {
           botToken: "123456789:abc-xyz",
-          dmPolicy: "pairing",
-          // Or skip pairing and whitelist numeric user IDs directly:
-          // allowFrom: ["987654321"]
-        },
-      },
-    },
-  },
+          dmPolicy: "pairing"
+        }
+      }
+    }
+  }
 }
 ```
 
-Or via environment variable (Docker: add to `.env`):
+Or via env var (Docker: add to `.env`):
 
 ```bash
 ZALO_BOT_TOKEN=123456789:abc-xyz
 ```
 
-For older OpenClaw builds without the plugin bundled:
-
-```bash
-openclaw plugins install @openclaw/zalo
-```
-
-**3. Restart the gateway**
-
-```bash
-openclaw daemon stop && openclaw gateway run
-```
-
-**4. Pair your account**
-
-With `dmPolicy: "pairing"`, message the bot once on Zalo — you'll get a one-time code. Approve it from the host:
+Restart the gateway, then pair: message the bot on Zalo → get a one-time code → approve from the host:
 
 ```bash
 openclaw pairing approve zalo <CODE>
 ```
 
-**5. Send a test message**
+**Zalo limits to be aware of:**
+- Outbound text capped at 2000 characters (streaming disabled)
+- Media uploads capped at `mediaMaxMb` (default 5)
+- Group chats not supported for Marketplace bots
 
-```bash
-openclaw message send --channel zalo --target <user_id> --message "hi"
-```
-
-**Limits to be aware of:**
-- Outbound text is capped at **2000 characters** (Zalo API limit) — streaming is disabled
-- Media uploads are capped by `mediaMaxMb` (default `5`)
-- Image/sticker/voice/file support is unreliable on Marketplace bots
-- Group chats are not supported for Marketplace bots
-
-> **Charts on Zalo:** `brew_chart.py` and `send_photo.py` currently target the Telegram Bot API only. To deliver charts through Zalo you'll need a Zalo-equivalent uploader and must keep images under the 5 MB cap.
+> **Charts on Zalo:** `brew_chart` and `send_photo.py` currently target Telegram only. For Zalo chart delivery, write a parallel uploader and call it from the specialist's chart scripts.
 
 ## Docker Details
 
@@ -499,55 +341,73 @@ openclaw message send --channel zalo --target <user_id> --message "hi"
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Yes | Your OpenRouter API key |
-| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_ALLOW_FROM` | Yes | Your numeric Telegram user ID |
-| `OPENCLAW_MODEL` | No | Model to use (default: `openrouter/x-ai/grok-3-fast`) |
+| `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
+| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
+| `TELEGRAM_ALLOW_FROM` | Yes | Your numeric Telegram user ID (comma-separated for multiple) |
+| `OPENCLAW_MODEL` | No | Model for all 4 agents (default: `openrouter/x-ai/grok-3-fast`) |
 | `TZ` | No | Timezone (default: `UTC`) |
 
 ### Persistent Data
 
-> **Security note:** The `openclaw-data` volume contains your API key and bot token in `openclaw.json`. Treat it like any other credential store — do not share or expose it.
+> **Security note:** The `openclaw-data` volume contains your API key, bot token, and all 4 workspaces. Treat it like any other credential store.
 
-The `openclaw-data` Docker volume persists all state at `/home/node/.openclaw/`:
-- `openclaw.json` — gateway config (auto-generated on first run)
-- `exec-approvals.json` — sqlite3 + python3 allowlist (auto-generated)
-- `workspace/` — agent workspace, memory, and database
+Contents of `/home/node/.openclaw/`:
+- `openclaw.json` — agent + channel config
+- `exec-approvals.json` — per-agent allowlists
+- `shared-data/starbucks_business.db` — canonical DB
+- `workspace/`, `workspace-analyst/`, `workspace-ds/`, `workspace-customer/` — per-agent state
 
-Config files (AGENTS.md, SOUL.md, etc.) are re-copied from the image on every start to stay in sync. The database is only generated once.
+Config files are re-copied from the image on every start to stay in sync with the repo. The DB and per-agent memory persist across restarts.
 
 ### Useful Commands
 
 ```bash
-# View logs
-docker compose logs -f
+docker compose logs -f                     # view logs
+docker compose up -d --build               # rebuild after editing configs
+docker compose down -v && docker compose up -d   # full reset
+docker compose exec analyst-bot bash       # shell into the container
 
-# Rebuild after changing config files or code
-docker compose up -d --build
-
-# Reset everything (database, config, memory)
-docker compose down -v
-docker compose up -d
-
-# Shell into the container
-docker compose exec analyst-bot bash
+# Inside the container — verify agent setup
+openclaw agents list
+cat ~/.openclaw/exec-approvals.json | python3 -m json.tool
 ```
 
 ### Control UI
 
-The OpenClaw web UI is available at `http://localhost:18789` when the container is running.
+The OpenClaw web UI is at `http://localhost:18789` when the container is running.
+
+## Security via NemoClaw
+
+This stack gives you **agent-level isolation**: each agent has its own workspace, scoped memory, and a narrow exec allowlist. But the agents still run as your user on your host — if the model is jailbroken into running shell commands, those commands execute in a normal user process.
+
+For **kernel-level sandboxing** (Landlock + seccomp + netns, declarative network egress allowlist, pinned image digest), run this whole stack inside [NemoClaw](https://github.com/NVIDIA/NemoClaw) — NVIDIA's alpha reference stack that boots OpenClaw inside an OpenShell-managed sandbox.
+
+Templates ship in `nemoclaw/`:
+
+| File | Purpose |
+|---|---|
+| [`nemoclaw/blueprint.yaml`](nemoclaw/blueprint.yaml) | NemoClaw blueprint — pinned image + 4 inference profiles (NVIDIA, OpenRouter, NIM, vLLM) |
+| [`nemoclaw/policy-additions.yaml`](nemoclaw/policy-additions.yaml) | Extra `network_policies` on top of the base (openrouter / vllm / nim + python3 Telegram access for chart delivery) |
+| [`nemoclaw/Dockerfile.sandbox`](nemoclaw/Dockerfile.sandbox) | Derivative sandbox image — `FROM` NVIDIA's upstream OpenClaw sandbox, bakes our config, keeps secrets out |
+| [`nemoclaw/entrypoint-sandbox.sh`](nemoclaw/entrypoint-sandbox.sh) | First-boot provisioning inside the sandbox (generates `openclaw.json` + workspaces + DB under writable `/sandbox/.openclaw-data/`) |
+
+Step-by-step instructions — build, pin, onboard, verify, and update — live in **[docs/NEMOCLAW_DEPLOYMENT.md](docs/NEMOCLAW_DEPLOYMENT.md)**.
+
+NemoClaw is alpha. Validate the multi-agent stack on vanilla OpenClaw (`docker compose up`) first, then layer NemoClaw on top.
 
 ## Troubleshooting
 
-| Problem | Solution |
+| Problem | Fix |
 |---|---|
-| `Unknown model: x-ai/grok-code-fast-1` | Run `openclaw configure` and pick a valid model (e.g. `x-ai/grok-3-fast`) |
-| `already running under launchd` | Run `openclaw daemon stop` first |
-| Bot doesn't query the database | Check `openclaw approvals get` — sqlite3 must be in the allowlist |
-| Bot can't generate charts | Check `openclaw approvals get` — python3 must be in the allowlist. Re-run `install.sh` to fix |
-| Telegram `Could not resolve @username` | Use your numeric user ID instead (get it from @userinfobot) |
-| Bot replies but with no data insights | Restart the gateway so it picks up the new workspace files |
+| `Unknown model: x-ai/grok-code-fast-1` | Run `openclaw configure` and pick a valid model, or set `OPENCLAW_MODEL` in `.env` |
+| `already running under launchd` | `openclaw daemon stop` first |
+| Concierge answers business questions itself instead of routing | Check that `openclaw-config/agents/concierge/SOUL.md` and `ROUTING.md` are in `~/.openclaw/workspace/` — re-run `install.sh` or restart the container |
+| Specialist can't query DB | `cat ~/.openclaw/exec-approvals.json` — the specialist agent should have sqlite3 + python3 in its allowlist. Re-run install to regenerate |
+| Specialist can't generate charts | Check the `data/python3` symlink exists in the specialist workspace and points to the venv |
+| Telegram `Could not resolve @username` | Use the numeric user ID from @userinfobot |
+| `invoke-specialist.sh: command not found` (from concierge) | The wrapper wasn't copied to `~/.openclaw/workspace/invoke-specialist.sh` — re-run install |
+| Specialist responds directly to Telegram instead of returning via concierge | The specialist was accidentally bound to telegram. Unbind: `openclaw agents unbind <name> --channel telegram` |
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT — see [LICENSE](LICENSE).

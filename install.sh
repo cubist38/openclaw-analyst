@@ -1,193 +1,263 @@
 #!/bin/bash
-# Install OpenClaw analyst bot configuration
+# Install Brewlytics (multi-agent OpenClaw analyst) on the host
 # Usage: bash install.sh
 #
-# This script:
-# 1. Checks dependencies (Node.js, Python 3, sqlite3, OpenClaw)
-# 2. Installs Python packages (pandas, matplotlib, seaborn)
-# 3. Copies analyst config files into the OpenClaw workspace
-# 4. Generates the Starbucks SQLite database
-# 5. Adds sqlite3 and python3 to the exec allowlist
+# For most users, Docker (docker compose up -d) is the recommended path.
+# This script is for local installs where you want to run the agents on
+# your own host, outside a container.
 #
-# Prerequisites: run `openclaw configure` first to set up API key and Telegram
+# What it does:
+#   1. Checks dependencies (Node, Python 3, sqlite3, OpenClaw)
+#   2. Creates a Python venv with pandas/matplotlib/seaborn/scipy
+#   3. Provisions 4 agent workspaces (concierge + 3 specialists)
+#   4. Generates the shared SQLite DB once; symlinks it into each specialist
+#   5. Writes a per-agent exec-approvals.json (concierge: wrapper only;
+#      specialists: sqlite3 + python3)
+#
+# Prerequisites: run `openclaw configure` first so the default 'main' agent
+# exists and Telegram is bound.
 
 set -e
 
-WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+OPENCLAW_DIR="${HOME}/.openclaw"
+SHARED_DATA_DIR="${OPENCLAW_DIR}/shared-data"
+SHARED_DB="${SHARED_DATA_DIR}/starbucks_business.db"
 
-echo "=== OpenClaw Business Analyst Bot Setup ==="
+CONCIERGE_WS="${OPENCLAW_WORKSPACE:-${OPENCLAW_DIR}/workspace}"  # default 'main'
+ANALYST_WS="${OPENCLAW_DIR}/workspace-analyst"
+DS_WS="${OPENCLAW_DIR}/workspace-ds"
+CUSTOMER_WS="${OPENCLAW_DIR}/workspace-customer"
+
+CONFIG_FILE="${OPENCLAW_DIR}/openclaw.json"
+APPROVALS_FILE="${OPENCLAW_DIR}/exec-approvals.json"
+CONFIG_SRC="${SCRIPT_DIR}/openclaw-config"
+
+MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+
+echo "=== Brewlytics Multi-Agent Setup ==="
 echo ""
 
-# --- Step 1: Check dependencies ---
-echo "[1/6] Checking dependencies..."
+# --- [1/7] Dependencies ---
+echo "[1/7] Checking dependencies..."
 
 if ! command -v node &>/dev/null; then
-    echo "  ERROR: Node.js is required but not installed."
-    echo "  Install it from https://nodejs.org/ or via your package manager:"
-    echo "    macOS:  brew install node@24"
-    echo "    Linux:  curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs"
+    echo "  ERROR: Node.js 22+ required. Install from https://nodejs.org/"
     exit 1
-else
-    echo "  Node.js: $(node -v)"
 fi
+echo "  Node.js: $(node -v)"
 
 if ! command -v openclaw &>/dev/null; then
-    echo "  OpenClaw not found. Installing..."
+    echo "  OpenClaw not found. Installing via npm..."
     npm install -g openclaw@latest
-else
-    echo "  OpenClaw: $(openclaw --version 2>&1 | head -1)"
 fi
+echo "  OpenClaw: $(openclaw --version 2>&1 | head -1)"
 
-if ! command -v python3 &>/dev/null; then
-    echo "  ERROR: Python 3 is required but not installed."
-    exit 1
-else
-    echo "  Python: $(python3 --version)"
-fi
+command -v python3 &>/dev/null || { echo "  ERROR: python3 required"; exit 1; }
+echo "  Python: $(python3 --version)"
 
-if ! command -v sqlite3 &>/dev/null; then
-    echo "  ERROR: sqlite3 is required but not installed."
-    exit 1
-else
-    echo "  sqlite3: $(sqlite3 --version | head -1)"
-fi
+command -v sqlite3 &>/dev/null || { echo "  ERROR: sqlite3 required"; exit 1; }
+echo "  sqlite3: $(sqlite3 --version | head -1)"
 
 echo ""
 
-# --- Step 2: Set up Python virtual environment and install packages ---
-echo "[2/6] Installing Python packages..."
+# --- [2/7] Python venv ---
+echo "[2/7] Installing Python packages..."
 
 VENV_DIR="$SCRIPT_DIR/.venv"
-
 if [ ! -f "$VENV_DIR/bin/pip" ]; then
-    echo "  Creating virtual environment at $VENV_DIR..."
+    echo "  Creating venv at $VENV_DIR..."
     rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
 
-"$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt" && \
-    echo "  Installed: pyyaml, pandas, matplotlib, seaborn, scipy" || \
-    { echo "  ERROR: Failed to install Python packages."; exit 1; }
+"$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt" \
+    && echo "  Installed: pyyaml, pandas, matplotlib, seaborn, scipy" \
+    || { echo "  ERROR: pip install failed"; exit 1; }
 
-# Use the venv python for all subsequent steps and for the bot's exec allowlist
 PYTHON3="$VENV_DIR/bin/python3"
 echo "  Using Python: $PYTHON3"
-
 echo ""
 
-# --- Step 3: Check OpenClaw is configured ---
-echo "[3/6] Checking OpenClaw configuration..."
+# --- [3/7] Check openclaw configure ran ---
+echo "[3/7] Checking OpenClaw configuration..."
 
-if [ ! -f "$HOME/.openclaw/openclaw.json" ]; then
+if [ ! -f "$CONFIG_FILE" ]; then
     echo ""
-    echo "  OpenClaw is not configured yet. Run:"
-    echo ""
+    echo "  ERROR: OpenClaw is not configured yet. Run:"
     echo "    openclaw configure"
-    echo ""
     echo "  Then re-run this script."
     exit 1
 fi
 
-if [ ! -d "$WORKSPACE" ]; then
-    echo "  ERROR: Workspace not found at $WORKSPACE"
+if [ ! -d "$CONCIERGE_WS" ]; then
+    echo "  ERROR: Concierge workspace not found at $CONCIERGE_WS"
     echo "  Run 'openclaw configure' first."
     exit 1
 fi
-
-echo "  Workspace: $WORKSPACE"
+echo "  Concierge workspace: $CONCIERGE_WS"
 echo ""
 
-# --- Step 4: Copy config files ---
-echo "[4/6] Installing analyst configuration files..."
+# --- [4/7] Provision specialist agents ---
+echo "[4/7] Provisioning specialist agents..."
 
-mkdir -p "$WORKSPACE/data"
-
-cp "$SCRIPT_DIR/openclaw-config/SOUL.md" "$WORKSPACE/SOUL.md"
-echo "  Copied SOUL.md (analyst identity)"
-
-cp "$SCRIPT_DIR/openclaw-config/DATA_ANALYST.md" "$WORKSPACE/DATA_ANALYST.md"
-echo "  Copied DATA_ANALYST.md (analyst playbook)"
-
-cp "$SCRIPT_DIR/openclaw-config/TECHNICAL_SKILLS.md" "$WORKSPACE/TECHNICAL_SKILLS.md"
-echo "  Copied TECHNICAL_SKILLS.md (advanced technical skills)"
-
-cp "$SCRIPT_DIR/openclaw-config/AGENTS.md" "$WORKSPACE/AGENTS.md"
-echo "  Copied AGENTS.md (startup routine)"
-
-cp "$SCRIPT_DIR/openclaw-config/MEMORY_RULES.md" "$WORKSPACE/MEMORY_RULES.md"
-echo "  Copied MEMORY_RULES.md (memory system)"
-
-cp "$SCRIPT_DIR/openclaw-config/GROUP_CHAT.md" "$WORKSPACE/GROUP_CHAT.md"
-echo "  Copied GROUP_CHAT.md (group chat rules)"
-
-cp "$SCRIPT_DIR/openclaw-config/HEARTBEAT_GUIDE.md" "$WORKSPACE/HEARTBEAT_GUIDE.md"
-echo "  Copied HEARTBEAT_GUIDE.md (heartbeat system)"
-
-cp -r "$SCRIPT_DIR/openclaw-config/skills" "$WORKSPACE/skills"
-echo "  Copied skills/ (9 analyst skills)"
-
-cp "$SCRIPT_DIR/openclaw-config/data/SCHEMA.md" "$WORKSPACE/data/SCHEMA.md"
-echo "  Copied data/SCHEMA.md (database schema)"
-
-cp "$SCRIPT_DIR/openclaw-config/data/send_photo.py" "$WORKSPACE/data/send_photo.py"
-echo "  Copied data/send_photo.py (Telegram image sender)"
-
-cp "$SCRIPT_DIR/openclaw-config/data/brew_chart.py" "$WORKSPACE/data/brew_chart.py"
-echo "  Copied data/brew_chart.py (chart helper with auto-send)"
-
+for entry in "analyst:${ANALYST_WS}" "data-scientist:${DS_WS}" "customer-intel:${CUSTOMER_WS}"; do
+    name="${entry%%:*}"
+    ws="${entry##*:}"
+    if openclaw agents list 2>/dev/null | grep -q " $name "; then
+        echo "  Agent '$name' already exists"
+    else
+        openclaw agents add "$name" --workspace "$ws" --model "$MODEL" \
+            && echo "  Added agent '$name' at $ws" \
+            || echo "  WARNING: 'openclaw agents add $name' failed — check: openclaw agents list"
+    fi
+done
 echo ""
 
-# --- Step 5: Generate database (skip if already exists) ---
-echo "[5/6] Generating Starbucks business database..."
+# --- [5/7] Generate shared DB ---
+echo "[5/7] Generating shared database..."
+mkdir -p "$SHARED_DATA_DIR"
 
-DB_FILE="$WORKSPACE/data/starbucks_business.db"
-if [ -f "$DB_FILE" ]; then
-    echo "  Database already exists at $DB_FILE"
-    echo "  To regenerate, delete it first: rm \"$DB_FILE\""
+if [ -f "$SHARED_DB" ]; then
+    echo "  DB exists at $SHARED_DB (skipping; rm to regenerate)"
 else
+    mkdir -p "$CONCIERGE_WS/data"
     "$PYTHON3" "$SCRIPT_DIR/generate_starbucks_db.py"
+    mv "$CONCIERGE_WS/data/starbucks_business.db" "$SHARED_DB"
+    rmdir "$CONCIERGE_WS/data" 2>/dev/null || true
+    echo "  DB generated at $SHARED_DB"
 fi
 echo ""
 
-# --- Step 6: Allowlist sqlite3 and python3 ---
-echo "[6/6] Adding sqlite3 and python3 to exec allowlist..."
+# --- [6/7] Install workspace files ---
+echo "[6/7] Installing workspace files..."
+
+# Concierge (main) — no DB, no analyst playbook, no skills
+mkdir -p "$CONCIERGE_WS/memory"
+cp "$CONFIG_SRC/shared/BRAND.md"                     "$CONCIERGE_WS/BRAND.md"
+cp "$CONFIG_SRC/shared/MEMORY_RULES.md"              "$CONCIERGE_WS/MEMORY_RULES.md"
+cp "$CONFIG_SRC/agents/concierge/SOUL.md"            "$CONCIERGE_WS/SOUL.md"
+cp "$CONFIG_SRC/agents/concierge/AGENTS.md"          "$CONCIERGE_WS/AGENTS.md"
+cp "$CONFIG_SRC/agents/concierge/ROUTING.md"         "$CONCIERGE_WS/ROUTING.md"
+cp "$CONFIG_SRC/agents/concierge/GROUP_CHAT.md"      "$CONCIERGE_WS/GROUP_CHAT.md"
+cp "$CONFIG_SRC/agents/concierge/HEARTBEAT_GUIDE.md" "$CONCIERGE_WS/HEARTBEAT_GUIDE.md"
+cp "$CONFIG_SRC/shared/invoke-specialist.sh"         "$CONCIERGE_WS/invoke-specialist.sh"
+chmod +x "$CONCIERGE_WS/invoke-specialist.sh"
+echo "  Installed concierge in $CONCIERGE_WS"
+
+install_specialist() {
+    local agent_dir="$1"
+    local workspace="$2"
+    local extra_file="$3"
+
+    mkdir -p "$workspace/data" "$workspace/memory"
+
+    cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"
+    cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$workspace/DATA_ANALYST.md"
+    cp "$CONFIG_SRC/shared/MEMORY_RULES.md"     "$workspace/MEMORY_RULES.md"
+    cp "$CONFIG_SRC/shared/data/SCHEMA.md"      "$workspace/data/SCHEMA.md"
+    cp "$CONFIG_SRC/shared/data/brew_chart.py"  "$workspace/data/brew_chart.py"
+    cp "$CONFIG_SRC/shared/data/send_photo.py"  "$workspace/data/send_photo.py"
+
+    cp "$CONFIG_SRC/agents/$agent_dir/SOUL.md"   "$workspace/SOUL.md"
+    cp "$CONFIG_SRC/agents/$agent_dir/AGENTS.md" "$workspace/AGENTS.md"
+
+    if [ -n "$extra_file" ]; then
+        cp "$CONFIG_SRC/agents/$agent_dir/$extra_file" "$workspace/$extra_file"
+    fi
+
+    rm -rf "$workspace/skills"
+    cp -r "$CONFIG_SRC/agents/$agent_dir/skills" "$workspace/skills"
+
+    ln -sf "$SHARED_DB" "$workspace/data/starbucks_business.db"
+    ln -sf "$PYTHON3"   "$workspace/data/python3"
+}
+
+install_specialist "analyst"        "$ANALYST_WS"   ""
+echo "  Installed analyst in $ANALYST_WS"
+install_specialist "data-scientist" "$DS_WS"        "TECHNICAL_SKILLS.md"
+echo "  Installed data-scientist in $DS_WS"
+install_specialist "customer-intel" "$CUSTOMER_WS"  ""
+echo "  Installed customer-intel in $CUSTOMER_WS"
+echo ""
+
+# --- [7/7] Per-agent exec approvals ---
+echo "[7/7] Writing per-agent exec-approvals.json..."
 
 SQLITE3_PATH="$(which sqlite3)"
-openclaw approvals allowlist add "$SQLITE3_PATH" 2>/dev/null && \
-    echo "  Allowlisted: $SQLITE3_PATH" || \
-    echo "  Already allowlisted or failed — check with: openclaw approvals get"
+SYS_PYTHON="$(which python3)"
 
-# Allowlist both the venv python3 (has charting libs) and system python3 (fallback)
-openclaw approvals allowlist add "$PYTHON3" 2>/dev/null && \
-    echo "  Allowlisted: $PYTHON3 (venv — has pandas, matplotlib, seaborn, scipy)" || \
-    echo "  Already allowlisted or failed — check with: openclaw approvals get"
-
-SYSTEM_PYTHON3="$(which python3)"
-if [ "$SYSTEM_PYTHON3" != "$PYTHON3" ]; then
-    openclaw approvals allowlist add "$SYSTEM_PYTHON3" 2>/dev/null && \
-        echo "  Allowlisted: $SYSTEM_PYTHON3 (system)" || \
-        echo "  Already allowlisted or failed"
+# Back up existing approvals if present (security config — don't silently overwrite)
+if [ -f "$APPROVALS_FILE" ]; then
+    BACKUP="${APPROVALS_FILE}.bak.$(date +%s)"
+    cp "$APPROVALS_FILE" "$BACKUP"
+    echo "  Backed up existing approvals to $BACKUP"
 fi
 
-# Symlink venv python3 into workspace so the bot can always use data/python3
-ln -sf "$PYTHON3" "$WORKSPACE/data/python3"
-echo "  Linked: $WORKSPACE/data/python3 -> $PYTHON3"
+cat > "$APPROVALS_FILE" << EOF
+{
+  "version": 1,
+  "defaults": {
+    "security": "allowlist",
+    "ask": "off",
+    "askFallback": "deny"
+  },
+  "agents": {
+    "main": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${CONCIERGE_WS}/invoke-specialist.sh" }
+      ]
+    },
+    "analyst": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3}" },
+        { "pattern": "${SYS_PYTHON}" },
+        { "pattern": "${ANALYST_WS}/data/python3" }
+      ]
+    },
+    "data-scientist": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3}" },
+        { "pattern": "${SYS_PYTHON}" },
+        { "pattern": "${DS_WS}/data/python3" }
+      ]
+    },
+    "customer-intel": {
+      "security": "allowlist",
+      "ask": "off",
+      "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3}" },
+        { "pattern": "${SYS_PYTHON}" },
+        { "pattern": "${CUSTOMER_WS}/data/python3" }
+      ]
+    }
+  }
+}
+EOF
 
-# Allowlist the symlink path too (this is what the bot will actually call)
-openclaw approvals allowlist add "$WORKSPACE/data/python3" 2>/dev/null && \
-    echo "  Allowlisted: $WORKSPACE/data/python3" || \
-    echo "  Already allowlisted or failed"
-
+echo "  Approvals written to $APPROVALS_FILE"
 echo ""
+
 echo "=== Setup complete! ==="
 echo ""
 echo "Start the bot:"
 echo "  openclaw gateway run"
 echo ""
-echo "Or as a background daemon:"
-echo "  openclaw daemon start"
-echo ""
-echo "Then open Telegram and ask your bot:"
-echo "  'What are my top 5 stores by revenue?'"
-echo ""
+echo "Message your Telegram bot — the concierge will route to specialists."

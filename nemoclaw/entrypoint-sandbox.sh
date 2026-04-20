@@ -1,0 +1,232 @@
+#!/bin/bash
+# First-boot provisioning for Brewlytics inside a NemoClaw sandbox.
+#
+# Runs as user `sandbox`. /sandbox/.openclaw is Landlock-read-only, so we write
+# everything to /sandbox/.openclaw-data/ — symlinks in the immutable dir (baked
+# by Dockerfile.sandbox) route OpenClaw reads through to these writable targets.
+#
+# On first boot:
+#   1. Generate openclaw.json from env vars (OPENROUTER_API_KEY or NVIDIA_API_KEY,
+#      TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM)
+#   2. Generate per-agent exec-approvals.json
+#   3. Assemble 4 workspaces (concierge + 3 specialists) under workspaces/
+#   4. Generate the shared SQLite DB and symlink it into each specialist
+#
+# On subsequent boots: everything exists, we just launch the gateway.
+
+set -e
+
+DATA=/sandbox/.openclaw-data
+CONFIG_FILE=$DATA/openclaw.json
+APPROVALS_FILE=$DATA/exec-approvals.json
+
+SHARED_DATA=$DATA/shared-data
+SHARED_DB=$SHARED_DATA/starbucks_business.db
+
+WS_CONCIERGE=$DATA/workspaces/main
+WS_ANALYST=$DATA/workspaces/analyst
+WS_DS=$DATA/workspaces/data-scientist
+WS_CUSTOMER=$DATA/workspaces/customer-intel
+
+CONFIG_SRC=/app/openclaw-config
+SQLITE3_PATH=$(command -v sqlite3)
+PYTHON3_PATH=$(command -v python3)
+
+# --- Select inference provider ----------------------------------------------
+# Blueprint profile picks this; we mirror the env vars NemoClaw's onboard
+# wizard sets, then fall back to OPENROUTER_API_KEY for the OpenRouter profile.
+if [ -n "${NVIDIA_API_KEY:-}" ]; then
+    INFERENCE_ENV_BLOCK="\"NVIDIA_API_KEY\": \"${NVIDIA_API_KEY}\""
+    MODEL="${OPENCLAW_MODEL:-nvidia/nemotron-3-super-120b-a12b}"
+elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    INFERENCE_ENV_BLOCK="\"OPENROUTER_API_KEY\": \"${OPENROUTER_API_KEY}\""
+    MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+else
+    echo "ERROR: one of NVIDIA_API_KEY or OPENROUTER_API_KEY must be set"
+    exit 1
+fi
+
+for var in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
+    if [ -z "${!var:-}" ]; then
+        echo "ERROR: $var is required"
+        exit 1
+    fi
+done
+
+mkdir -p "$DATA" "$SHARED_DATA" "$DATA/workspaces"
+
+# --- openclaw.json (writable target of the immutable symlink) ---------------
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "[nemoclaw-entrypoint] Generating openclaw.json..."
+
+    ALLOW_JSON=$(python3 -c "
+import os, json
+ids = [f'tg:{uid.strip()}' for uid in os.environ['TELEGRAM_ALLOW_FROM'].split(',') if uid.strip()]
+print(json.dumps(ids))
+")
+
+    cat > "$CONFIG_FILE" << EOF
+{
+  "env": {
+    ${INFERENCE_ENV_BLOCK}
+  },
+  "agents": {
+    "defaults": {
+      "model": "${MODEL}",
+      "workspace": "${WS_CONCIERGE}"
+    },
+    "analyst": {
+      "model": "${MODEL}",
+      "workspace": "${WS_ANALYST}"
+    },
+    "data-scientist": {
+      "model": "${MODEL}",
+      "workspace": "${WS_DS}"
+    },
+    "customer-intel": {
+      "model": "${MODEL}",
+      "workspace": "${WS_CUSTOMER}"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "allowFrom": ${ALLOW_JSON}
+    }
+  },
+  "gateway": {
+    "bind": "lan"
+  }
+}
+EOF
+    chmod 600 "$CONFIG_FILE"
+fi
+
+# --- exec-approvals.json ----------------------------------------------------
+if [ ! -f "$APPROVALS_FILE" ]; then
+    echo "[nemoclaw-entrypoint] Generating exec-approvals.json..."
+    cat > "$APPROVALS_FILE" << EOF
+{
+  "version": 1,
+  "defaults": {
+    "security": "allowlist",
+    "ask": "off",
+    "askFallback": "deny"
+  },
+  "agents": {
+    "main": {
+      "security": "allowlist", "ask": "off", "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${WS_CONCIERGE}/invoke-specialist.sh" }
+      ]
+    },
+    "analyst": {
+      "security": "allowlist", "ask": "off", "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${WS_ANALYST}/data/python3" }
+      ]
+    },
+    "data-scientist": {
+      "security": "allowlist", "ask": "off", "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${WS_DS}/data/python3" }
+      ]
+    },
+    "customer-intel": {
+      "security": "allowlist", "ask": "off", "askFallback": "deny",
+      "autoAllowSkills": true,
+      "allowlist": [
+        { "pattern": "${SQLITE3_PATH}" },
+        { "pattern": "${PYTHON3_PATH}" },
+        { "pattern": "${WS_CUSTOMER}/data/python3" }
+      ]
+    }
+  }
+}
+EOF
+    chmod 600 "$APPROVALS_FILE"
+fi
+
+# --- Shared DB --------------------------------------------------------------
+if [ ! -f "$SHARED_DB" ]; then
+    echo "[nemoclaw-entrypoint] Generating Starbucks DB..."
+    # Generator writes to ~/.openclaw/workspace/data/; we relocate.
+    # Inside the sandbox, HOME is /sandbox and that default path is Landlock-
+    # restricted, so we override the config's db_path via a side-car temp dir.
+    tmpdir=$(mktemp -d)
+    (cd /app && \
+        HOME="$tmpdir" python3 /app/generate_starbucks_db.py) || {
+            echo "ERROR: DB generation failed"; exit 1;
+        }
+    mv "$tmpdir/.openclaw/workspace/data/starbucks_business.db" "$SHARED_DB"
+    rm -rf "$tmpdir"
+fi
+
+# --- Workspace assembly (per agent) ----------------------------------------
+install_specialist() {
+    local agent_dir="$1"   # concierge | analyst | data-scientist | customer-intel
+    local ws="$2"
+    local extra_file="$3"  # optional, e.g. TECHNICAL_SKILLS.md
+
+    mkdir -p "$ws/memory"
+
+    cp "$CONFIG_SRC/shared/BRAND.md"          "$ws/BRAND.md"
+    cp "$CONFIG_SRC/shared/MEMORY_RULES.md"   "$ws/MEMORY_RULES.md"
+    cp "$CONFIG_SRC/agents/$agent_dir/SOUL.md" "$ws/SOUL.md"
+    cp "$CONFIG_SRC/agents/$agent_dir/AGENTS.md" "$ws/AGENTS.md"
+
+    # Specialist-only: DATA_ANALYST.md + schema + chart helpers + DB + python3
+    if [ "$agent_dir" != "concierge" ]; then
+        mkdir -p "$ws/data"
+        cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$ws/DATA_ANALYST.md"
+        cp "$CONFIG_SRC/shared/data/SCHEMA.md"      "$ws/data/SCHEMA.md"
+        cp "$CONFIG_SRC/shared/data/brew_chart.py"  "$ws/data/brew_chart.py"
+        cp "$CONFIG_SRC/shared/data/send_photo.py"  "$ws/data/send_photo.py"
+        ln -sf "$SHARED_DB"     "$ws/data/starbucks_business.db"
+        ln -sf "$PYTHON3_PATH"  "$ws/data/python3"
+
+        if [ -d "$CONFIG_SRC/agents/$agent_dir/skills" ]; then
+            rm -rf "$ws/skills"
+            cp -r "$CONFIG_SRC/agents/$agent_dir/skills" "$ws/skills"
+        fi
+    fi
+
+    if [ -n "$extra_file" ]; then
+        cp "$CONFIG_SRC/agents/$agent_dir/$extra_file" "$ws/$extra_file"
+    fi
+}
+
+# Concierge: no DB, no DATA_ANALYST.md, no skills — just routing
+if [ ! -f "$WS_CONCIERGE/SOUL.md" ]; then
+    echo "[nemoclaw-entrypoint] Installing concierge workspace..."
+    install_specialist "concierge" "$WS_CONCIERGE" ""
+    cp "$CONFIG_SRC/agents/concierge/ROUTING.md"          "$WS_CONCIERGE/ROUTING.md"
+    cp "$CONFIG_SRC/agents/concierge/GROUP_CHAT.md"       "$WS_CONCIERGE/GROUP_CHAT.md"
+    cp "$CONFIG_SRC/agents/concierge/HEARTBEAT_GUIDE.md"  "$WS_CONCIERGE/HEARTBEAT_GUIDE.md"
+    cp "$CONFIG_SRC/shared/invoke-specialist.sh"          "$WS_CONCIERGE/invoke-specialist.sh"
+    chmod +x "$WS_CONCIERGE/invoke-specialist.sh"
+fi
+
+# Specialists
+if [ ! -f "$WS_ANALYST/SOUL.md" ]; then
+    echo "[nemoclaw-entrypoint] Installing analyst workspace..."
+    install_specialist "analyst"        "$WS_ANALYST"   ""
+fi
+if [ ! -f "$WS_DS/SOUL.md" ]; then
+    echo "[nemoclaw-entrypoint] Installing data-scientist workspace..."
+    install_specialist "data-scientist" "$WS_DS"        "TECHNICAL_SKILLS.md"
+fi
+if [ ! -f "$WS_CUSTOMER/SOUL.md" ]; then
+    echo "[nemoclaw-entrypoint] Installing customer-intel workspace..."
+    install_specialist "customer-intel" "$WS_CUSTOMER"  ""
+fi
+
+echo "[nemoclaw-entrypoint] Ready. Launching gateway..."
+exec openclaw gateway run
