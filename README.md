@@ -94,7 +94,6 @@ On first boot the container:
 Then message your Telegram bot: **"What are my top 5 stores by revenue?"** — the concierge routes it to `analyst`.
 
 > **Tip:** Use your numeric Telegram user ID for `TELEGRAM_ALLOW_FROM` — the username resolver is unreliable. Get it from [@userinfobot](https://t.me/userinfobot).
-> Avoid `TELEGRAM_ALLOW_FROM=*` except for short smoke tests; it lets anyone who can reach the bot message it.
 
 Verify the container:
 
