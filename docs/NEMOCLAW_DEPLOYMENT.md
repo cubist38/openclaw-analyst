@@ -64,7 +64,7 @@ Credentials never live in the image: `openclaw.json` in `/sandbox/.openclaw/` is
 - One of:
   - OpenRouter API key (`OPENROUTER_API_KEY`) — matches the vanilla-Docker deployment
   - NVIDIA API key (`NVIDIA_API_KEY`) — uses NemoClaw's default Nemotron inference
-  - A reachable NIM or vLLM endpoint with `NIM_API_KEY` / `OPENAI_API_KEY`
+  - A reachable NIM or vLLM endpoint with `NIM_API_KEY` / `VLLM_API_KEY`
 - Telegram bot token + numeric user ID
 
 ## Deployment
@@ -102,7 +102,7 @@ Edit `nemoclaw/blueprint.yaml`:
 | `default` | `https://integrate.api.nvidia.com/v1` | `NVIDIA_API_KEY` | NemoClaw's happy path — NVIDIA-hosted Nemotron |
 | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | Match the vanilla-Docker deployment (Grok, Claude, GPT, etc.) |
 | `nim-local` | `http://nim-service.local:8000/v1` | `NIM_API_KEY` | On-prem NIM microservice |
-| `vllm` | `http://vllm.local:8000/v1` | `OPENAI_API_KEY` | Self-hosted vLLM |
+| `vllm` | `http://vllm.local:8000/v1` | `VLLM_API_KEY` | Self-hosted vLLM |
 
 Each profile has a matching block in `nemoclaw/policy-additions.yaml` that opens the egress path. Enable only the one you need — delete the others to keep the allowlist tight.
 
@@ -117,6 +117,9 @@ export TELEGRAM_ALLOW_FROM=<your-numeric-user-id>
 # Pick ONE inference credential:
 export OPENROUTER_API_KEY=<sk-or-…>        # if using the `openrouter` profile
 # export NVIDIA_API_KEY=<nvapi-…>           # if using the `default` or `nim-local` profile
+# export VLLM_API_KEY=vllm-local            # if using the `vllm` profile; any value works without auth
+# export OPENCLAW_MODEL=vllm/<your-model-id>
+# export VLLM_BASE_URL=http://vllm.local:8000/v1
 
 nemoclaw onboard \
   --blueprint ./nemoclaw/blueprint.yaml \

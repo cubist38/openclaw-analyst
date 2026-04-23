@@ -6,11 +6,20 @@ services:
     ports:
       - "18789:18789"
     environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENCLAW_PROVIDER=${OPENCLAW_PROVIDER:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-}
+      - VLLM_CONTEXT_WINDOW=${VLLM_CONTEXT_WINDOW:-}
+      - VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS:-}
+      - VLLM_REASONING=${VLLM_REASONING:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM}
-      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-}
       - TZ=${TZ:-UTC}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - openclaw-data:/home/node/.openclaw
 

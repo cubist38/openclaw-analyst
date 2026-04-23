@@ -66,7 +66,7 @@ One delegation per user turn. The specialist suggests a "Next Pour" — the user
 
 - Linux (tested) or macOS
 - Docker + Docker Compose (recommended) — or Node.js 22+ / Python 3.10+ / sqlite3 for a local install
-- An [OpenRouter](https://openrouter.ai) API key
+- One inference backend: an [OpenRouter](https://openrouter.ai) API key, or a reachable OpenAI-compatible vLLM server
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram numeric user ID (message [@userinfobot](https://t.me/userinfobot) to get it)
 
@@ -77,7 +77,7 @@ git clone https://github.com/cubist38/openclaw-analyst.git
 cd openclaw-analyst
 
 cp .env.example .env
-# Edit .env with OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM
+# Edit .env with Telegram credentials and either OpenRouter or vLLM settings
 
 docker compose up -d
 ```
@@ -341,11 +341,42 @@ openclaw pairing approve zalo <CODE>
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
+| `OPENCLAW_PROVIDER` | No | `openrouter` or `vllm` (default: `openrouter`) |
+| `OPENROUTER_API_KEY` | For OpenRouter | OpenRouter API key |
+| `VLLM_API_KEY` | For vLLM | vLLM API key. Use any non-empty value if your server does not enforce auth |
+| `VLLM_BASE_URL` | For remote vLLM | OpenAI-compatible vLLM `/v1` endpoint (Docker example: `http://host.docker.internal:8000/v1`) |
 | `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | Yes | Your numeric Telegram user ID (comma-separated for multiple) |
-| `OPENCLAW_MODEL` | No | Model for all 4 agents (default: `openrouter/x-ai/grok-3-fast`) |
+| `OPENCLAW_MODEL` | No for OpenRouter, yes for vLLM | Model for all 4 agents. OpenRouter default: `openrouter/x-ai/grok-3-fast`; vLLM example: `vllm/meta-llama/Llama-3.1-8B-Instruct` |
+| `VLLM_MODEL_NAME` | No | Display name for the configured vLLM model |
+| `VLLM_CONTEXT_WINDOW` | No | Context window metadata for explicit vLLM config (default: `128000`) |
+| `VLLM_MAX_TOKENS` | No | Max output metadata for explicit vLLM config (default: `8192`) |
+| `VLLM_REASONING` | No | Set `true` only for vLLM-served reasoning models that should be marked as reasoning-capable |
 | `TZ` | No | Timezone (default: `UTC`) |
+
+### Inference Examples
+
+OpenRouter:
+
+```bash
+OPENCLAW_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENCLAW_MODEL=openrouter/x-ai/grok-3-fast
+```
+
+vLLM on your host or LAN:
+
+```bash
+OPENCLAW_PROVIDER=vllm
+OPENCLAW_MODEL=vllm/meta-llama/Llama-3.1-8B-Instruct
+VLLM_API_KEY=vllm-local
+VLLM_BASE_URL=http://host.docker.internal:8000/v1
+VLLM_CONTEXT_WINDOW=128000
+VLLM_MAX_TOKENS=8192
+VLLM_REASONING=false
+```
+
+For Linux Docker hosts, this compose file maps `host.docker.internal` to the host gateway. For another machine, set `VLLM_BASE_URL` to a resolvable LAN hostname or IP, for example `http://192.168.1.50:8000/v1`.
 
 ### Persistent Data
 

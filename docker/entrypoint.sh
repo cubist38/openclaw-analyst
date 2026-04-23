@@ -30,34 +30,104 @@ SQLITE3_PATH="$(which sqlite3)"
 PYTHON3_PATH="$(which python3)"
 
 # --- Validate required env ---
-for var in OPENROUTER_API_KEY TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
+for var in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
     if [ -z "${!var}" ]; then
         echo "ERROR: $var is required"
         exit 1
     fi
 done
 
-MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+PROVIDER="${OPENCLAW_PROVIDER:-}"
+if [ -z "$PROVIDER" ]; then
+    if [ -n "${VLLM_API_KEY:-}" ] || [[ "${OPENCLAW_MODEL:-}" == vllm/* ]]; then
+        PROVIDER="vllm"
+    else
+        PROVIDER="openrouter"
+    fi
+fi
+
+case "$PROVIDER" in
+    openrouter)
+        if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "ERROR: OPENROUTER_API_KEY is required when OPENCLAW_PROVIDER=openrouter"
+            exit 1
+        fi
+        MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+        ;;
+    vllm)
+        if [ -z "${OPENCLAW_MODEL:-}" ]; then
+            echo "ERROR: OPENCLAW_MODEL is required for vLLM, e.g. vllm/meta-llama/Llama-3.1-8B-Instruct"
+            exit 1
+        fi
+        if [[ "$OPENCLAW_MODEL" != vllm/* ]]; then
+            echo "ERROR: vLLM models must use the vllm/<model-id> form"
+            exit 1
+        fi
+        MODEL="$OPENCLAW_MODEL"
+        export VLLM_API_KEY="${VLLM_API_KEY:-vllm-local}"
+        export VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
+        export VLLM_CONTEXT_WINDOW="${VLLM_CONTEXT_WINDOW:-128000}"
+        export VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-8192}"
+        ;;
+    *)
+        echo "ERROR: OPENCLAW_PROVIDER must be one of: openrouter, vllm"
+        exit 1
+        ;;
+esac
 
 # --- Generate openclaw.json if missing ---
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[entrypoint] No openclaw.json found — generating from environment..."
 
-    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" <<'PY'
+    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" <<'PY'
 import json
 import os
 import sys
 
-config_file, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
+config_file, provider, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
 allow_from = [
     f"tg:{uid.strip()}"
     for uid in os.environ["TELEGRAM_ALLOW_FROM"].split(",")
     if uid.strip()
 ]
+env = {}
+models_config = None
+if provider == "openrouter":
+    env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+elif provider == "vllm":
+    model_id = model.removeprefix("vllm/")
+    env["VLLM_API_KEY"] = os.environ["VLLM_API_KEY"]
+    models_config = {
+        "mode": "merge",
+        "providers": {
+            "vllm": {
+                "baseUrl": os.environ["VLLM_BASE_URL"],
+                "apiKey": "${VLLM_API_KEY}",
+                "api": "openai-completions",
+                "models": [
+                    {
+                        "id": model_id,
+                        "name": os.environ.get("VLLM_MODEL_NAME", model_id),
+                        "reasoning": os.environ.get("VLLM_REASONING", "false").lower() == "true",
+                        "input": ["text"],
+                        "cost": {
+                            "input": 0,
+                            "output": 0,
+                            "cacheRead": 0,
+                            "cacheWrite": 0,
+                        },
+                        "contextWindow": int(os.environ["VLLM_CONTEXT_WINDOW"]),
+                        "maxTokens": int(os.environ["VLLM_MAX_TOKENS"]),
+                    },
+                ],
+            },
+        },
+    }
+else:
+    raise SystemExit(f"unsupported provider: {provider}")
+
 config = {
-    "env": {
-        "OPENROUTER_API_KEY": os.environ["OPENROUTER_API_KEY"],
-    },
+    "env": env,
     "agents": {
         "defaults": {
             "model": model,
@@ -86,6 +156,8 @@ config = {
         "bind": "lan",
     },
 }
+if models_config:
+    config["models"] = models_config
 with open(config_file, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
@@ -93,8 +165,8 @@ PY
     echo "[entrypoint] Config created at $CONFIG_FILE"
 else
     echo "[entrypoint] Config exists, skipping generation"
-    echo "  NOTE: Changes to OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM,"
-    echo "  or OPENCLAW_MODEL env vars will NOT take effect until the volume is reset."
+    echo "  NOTE: Changes to OPENCLAW_PROVIDER, OPENCLAW_MODEL, model credentials,"
+    echo "  TELEGRAM_BOT_TOKEN, or TELEGRAM_ALLOW_FROM env vars will NOT take effect until the volume is reset."
     echo "  To reconfigure: docker compose down -v && docker compose up -d"
 fi
 

@@ -6,7 +6,8 @@
 # by Dockerfile.sandbox) route OpenClaw reads through to these writable targets.
 #
 # On first boot:
-#   1. Generate openclaw.json from env vars (OPENROUTER_API_KEY or NVIDIA_API_KEY,
+#   1. Generate openclaw.json from env vars (OPENROUTER_API_KEY, NVIDIA_API_KEY,
+#      or VLLM_API_KEY,
 #      TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOW_FROM)
 #   2. Generate per-agent exec-approvals.json
 #   3. Assemble 4 workspaces (concierge + 3 specialists) under workspaces/
@@ -34,17 +35,35 @@ PYTHON3_PATH=$(command -v python3)
 
 # --- Select inference provider ----------------------------------------------
 # Blueprint profile picks this; we mirror the env vars NemoClaw's onboard
-# wizard sets, then fall back to OPENROUTER_API_KEY for the OpenRouter profile.
+# wizard sets, then fall back to OPENROUTER_API_KEY or VLLM_API_KEY.
 if [ -n "${NVIDIA_API_KEY:-}" ]; then
+    INFERENCE_PROVIDER="nvidia"
     INFERENCE_ENV_KEY="NVIDIA_API_KEY"
     INFERENCE_ENV_VALUE="${NVIDIA_API_KEY}"
     MODEL="${OPENCLAW_MODEL:-nvidia/nemotron-3-super-120b-a12b}"
 elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    INFERENCE_PROVIDER="openrouter"
     INFERENCE_ENV_KEY="OPENROUTER_API_KEY"
     INFERENCE_ENV_VALUE="${OPENROUTER_API_KEY}"
     MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+elif [ -n "${VLLM_API_KEY:-}" ]; then
+    INFERENCE_PROVIDER="vllm"
+    INFERENCE_ENV_KEY="VLLM_API_KEY"
+    INFERENCE_ENV_VALUE="${VLLM_API_KEY}"
+    MODEL="${OPENCLAW_MODEL:-}"
+    if [ -z "$MODEL" ]; then
+        echo "ERROR: OPENCLAW_MODEL is required for vLLM, e.g. vllm/meta-llama/Llama-3.1-8B-Instruct"
+        exit 1
+    fi
+    if [[ "$MODEL" != vllm/* ]]; then
+        echo "ERROR: vLLM models must use the vllm/<model-id> form"
+        exit 1
+    fi
+    export VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm.local:8000/v1}"
+    export VLLM_CONTEXT_WINDOW="${VLLM_CONTEXT_WINDOW:-128000}"
+    export VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-8192}"
 else
-    echo "ERROR: one of NVIDIA_API_KEY or OPENROUTER_API_KEY must be set"
+    echo "ERROR: one of NVIDIA_API_KEY, OPENROUTER_API_KEY, or VLLM_API_KEY must be set"
     exit 1
 fi
 
@@ -61,13 +80,14 @@ mkdir -p "$DATA" "$SHARED_DATA" "$DATA/workspaces"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[nemoclaw-entrypoint] Generating openclaw.json..."
 
-    python3 - "$CONFIG_FILE" "$MODEL" "$INFERENCE_ENV_KEY" "$INFERENCE_ENV_VALUE" "$WS_CONCIERGE" "$WS_ANALYST" "$WS_DS" "$WS_CUSTOMER" <<'PY'
+    python3 - "$CONFIG_FILE" "$INFERENCE_PROVIDER" "$MODEL" "$INFERENCE_ENV_KEY" "$INFERENCE_ENV_VALUE" "$WS_CONCIERGE" "$WS_ANALYST" "$WS_DS" "$WS_CUSTOMER" <<'PY'
 import json
 import os
 import sys
 
 (
     config_file,
+    provider,
     model,
     inference_env_key,
     inference_env_value,
@@ -81,10 +101,40 @@ allow_from = [
     for uid in os.environ["TELEGRAM_ALLOW_FROM"].split(",")
     if uid.strip()
 ]
+env = {
+    inference_env_key: inference_env_value,
+}
+models_config = None
+if provider == "vllm":
+    model_id = model.removeprefix("vllm/")
+    models_config = {
+        "mode": "merge",
+        "providers": {
+            "vllm": {
+                "baseUrl": os.environ["VLLM_BASE_URL"],
+                "apiKey": "${VLLM_API_KEY}",
+                "api": "openai-completions",
+                "models": [
+                    {
+                        "id": model_id,
+                        "name": os.environ.get("VLLM_MODEL_NAME", model_id),
+                        "reasoning": os.environ.get("VLLM_REASONING", "false").lower() == "true",
+                        "input": ["text"],
+                        "cost": {
+                            "input": 0,
+                            "output": 0,
+                            "cacheRead": 0,
+                            "cacheWrite": 0,
+                        },
+                        "contextWindow": int(os.environ["VLLM_CONTEXT_WINDOW"]),
+                        "maxTokens": int(os.environ["VLLM_MAX_TOKENS"]),
+                    },
+                ],
+            },
+        },
+    }
 config = {
-    "env": {
-        inference_env_key: inference_env_value,
-    },
+    "env": env,
     "agents": {
         "defaults": {
             "model": model,
@@ -113,6 +163,8 @@ config = {
         "bind": "lan",
     },
 }
+if models_config:
+    config["models"] = models_config
 with open(config_file, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
