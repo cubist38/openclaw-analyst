@@ -26,6 +26,13 @@ CONFIG_FILE="${OPENCLAW_DIR}/openclaw.json"
 APPROVALS_FILE="${OPENCLAW_DIR}/exec-approvals.json"
 CONFIG_SRC="/opt/analyst/openclaw-config"
 
+if [ "$(id -u)" = "0" ]; then
+    mkdir -p /home/node/.openclaw
+    chown -R node:node /home/node/.openclaw
+    export HOME=/home/node
+    exec su -p node -s /bin/bash -c 'exec /opt/analyst/entrypoint.sh --as-node'
+fi
+
 SQLITE3_PATH="$(which sqlite3)"
 PYTHON3_PATH="$(which python3)"
 
@@ -133,18 +140,33 @@ config = {
             "model": model,
             "workspace": concierge_ws,
         },
-        "analyst": {
-            "model": model,
-            "workspace": analyst_ws,
-        },
-        "data-scientist": {
-            "model": model,
-            "workspace": ds_ws,
-        },
-        "customer-intel": {
-            "model": model,
-            "workspace": customer_ws,
-        },
+        "list": [
+            {
+                "id": "main",
+                "default": True,
+                "name": "concierge",
+                "workspace": concierge_ws,
+                "model": model,
+            },
+            {
+                "id": "analyst",
+                "name": "analyst",
+                "workspace": analyst_ws,
+                "model": model,
+            },
+            {
+                "id": "data-scientist",
+                "name": "data-scientist",
+                "workspace": ds_ws,
+                "model": model,
+            },
+            {
+                "id": "customer-intel",
+                "name": "customer-intel",
+                "workspace": customer_ws,
+                "model": model,
+            },
+        ],
     },
     "channels": {
         "telegram": {
@@ -153,7 +175,9 @@ config = {
         },
     },
     "gateway": {
+        "mode": "local",
         "bind": "lan",
+        "port": 18789,
     },
 }
 if models_config:
@@ -170,18 +194,9 @@ else
     echo "  To reconfigure: docker compose down -v && docker compose up -d"
 fi
 
-# --- Also register specialists via the CLI (belt-and-suspenders with openclaw.json) ---
-# If openclaw reads agents purely from openclaw.json this is a no-op; if it needs
-# an explicit 'agents add', this covers it. Either way, second run is idempotent.
-for entry in "analyst:${ANALYST_WS}" "data-scientist:${DS_WS}" "customer-intel:${CUSTOMER_WS}"; do
-    name="${entry%%:*}"
-    ws="${entry##*:}"
-    if ! openclaw agents list 2>/dev/null | grep -q " $name "; then
-        openclaw agents add "$name" --workspace "$ws" --model "$MODEL" 2>/dev/null \
-            && echo "[entrypoint] Registered agent '$name'" \
-            || echo "[entrypoint] 'openclaw agents add $name' failed (may already exist)"
-    fi
-done
+# Agents are declared directly in openclaw.json above. Avoid calling
+# `openclaw agents list/add` during container boot: on headless first boot it
+# may wait for daemon state and block the entrypoint before the gateway starts.
 
 # --- Per-agent exec approvals ---
 # Concierge gets ONLY the specialist invoker wrapper. No raw openclaw, no sqlite3,

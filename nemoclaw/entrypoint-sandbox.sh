@@ -140,18 +140,33 @@ config = {
             "model": model,
             "workspace": concierge_ws,
         },
-        "analyst": {
-            "model": model,
-            "workspace": analyst_ws,
-        },
-        "data-scientist": {
-            "model": model,
-            "workspace": ds_ws,
-        },
-        "customer-intel": {
-            "model": model,
-            "workspace": customer_ws,
-        },
+        "list": [
+            {
+                "id": "main",
+                "default": True,
+                "name": "concierge",
+                "workspace": concierge_ws,
+                "model": model,
+            },
+            {
+                "id": "analyst",
+                "name": "analyst",
+                "workspace": analyst_ws,
+                "model": model,
+            },
+            {
+                "id": "data-scientist",
+                "name": "data-scientist",
+                "workspace": ds_ws,
+                "model": model,
+            },
+            {
+                "id": "customer-intel",
+                "name": "customer-intel",
+                "workspace": customer_ws,
+                "model": model,
+            },
+        ],
     },
     "channels": {
         "telegram": {
@@ -160,7 +175,9 @@ config = {
         },
     },
     "gateway": {
+        "mode": "local",
         "bind": "lan",
+        "port": 18789,
     },
 }
 if models_config:

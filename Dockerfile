@@ -22,11 +22,11 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /opt/analyst/requirem
 COPY --chown=node:node docker/entrypoint.sh /opt/analyst/entrypoint.sh
 RUN chmod +x /opt/analyst/entrypoint.sh
 
-USER node
+USER root
 
 EXPOSE 18789
 
-HEALTHCHECK --interval=3m --timeout=10s \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s \
     CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/opt/analyst/entrypoint.sh"]
