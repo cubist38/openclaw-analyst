@@ -43,46 +43,53 @@ MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[entrypoint] No openclaw.json found — generating from environment..."
 
-    ALLOW_JSON=$(python3 -c "
-import os, json
-ids = [f'tg:{uid.strip()}' for uid in os.environ['TELEGRAM_ALLOW_FROM'].split(',') if uid.strip()]
-print(json.dumps(ids))
-")
+    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" <<'PY'
+import json
+import os
+import sys
 
-    cat > "$CONFIG_FILE" << EOF
-{
-  "env": {
-    "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
-  },
-  "agents": {
-    "defaults": {
-      "model": "${MODEL}",
-      "workspace": "${CONCIERGE_WS}"
+config_file, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
+allow_from = [
+    f"tg:{uid.strip()}"
+    for uid in os.environ["TELEGRAM_ALLOW_FROM"].split(",")
+    if uid.strip()
+]
+config = {
+    "env": {
+        "OPENROUTER_API_KEY": os.environ["OPENROUTER_API_KEY"],
     },
-    "analyst": {
-      "model": "${MODEL}",
-      "workspace": "${ANALYST_WS}"
+    "agents": {
+        "defaults": {
+            "model": model,
+            "workspace": concierge_ws,
+        },
+        "analyst": {
+            "model": model,
+            "workspace": analyst_ws,
+        },
+        "data-scientist": {
+            "model": model,
+            "workspace": ds_ws,
+        },
+        "customer-intel": {
+            "model": model,
+            "workspace": customer_ws,
+        },
     },
-    "data-scientist": {
-      "model": "${MODEL}",
-      "workspace": "${DS_WS}"
+    "channels": {
+        "telegram": {
+            "botToken": os.environ["TELEGRAM_BOT_TOKEN"],
+            "allowFrom": allow_from,
+        },
     },
-    "customer-intel": {
-      "model": "${MODEL}",
-      "workspace": "${CUSTOMER_WS}"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "botToken": "${TELEGRAM_BOT_TOKEN}",
-      "allowFrom": ${ALLOW_JSON}
-    }
-  },
-  "gateway": {
-    "bind": "lan"
-  }
+    "gateway": {
+        "bind": "lan",
+    },
 }
-EOF
+with open(config_file, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+PY
     echo "[entrypoint] Config created at $CONFIG_FILE"
 else
     echo "[entrypoint] Config exists, skipping generation"

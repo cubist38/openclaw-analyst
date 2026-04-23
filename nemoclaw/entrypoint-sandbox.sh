@@ -36,10 +36,12 @@ PYTHON3_PATH=$(command -v python3)
 # Blueprint profile picks this; we mirror the env vars NemoClaw's onboard
 # wizard sets, then fall back to OPENROUTER_API_KEY for the OpenRouter profile.
 if [ -n "${NVIDIA_API_KEY:-}" ]; then
-    INFERENCE_ENV_BLOCK="\"NVIDIA_API_KEY\": \"${NVIDIA_API_KEY}\""
+    INFERENCE_ENV_KEY="NVIDIA_API_KEY"
+    INFERENCE_ENV_VALUE="${NVIDIA_API_KEY}"
     MODEL="${OPENCLAW_MODEL:-nvidia/nemotron-3-super-120b-a12b}"
 elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
-    INFERENCE_ENV_BLOCK="\"OPENROUTER_API_KEY\": \"${OPENROUTER_API_KEY}\""
+    INFERENCE_ENV_KEY="OPENROUTER_API_KEY"
+    INFERENCE_ENV_VALUE="${OPENROUTER_API_KEY}"
     MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
 else
     echo "ERROR: one of NVIDIA_API_KEY or OPENROUTER_API_KEY must be set"
@@ -59,46 +61,62 @@ mkdir -p "$DATA" "$SHARED_DATA" "$DATA/workspaces"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[nemoclaw-entrypoint] Generating openclaw.json..."
 
-    ALLOW_JSON=$(python3 -c "
-import os, json
-ids = [f'tg:{uid.strip()}' for uid in os.environ['TELEGRAM_ALLOW_FROM'].split(',') if uid.strip()]
-print(json.dumps(ids))
-")
+    python3 - "$CONFIG_FILE" "$MODEL" "$INFERENCE_ENV_KEY" "$INFERENCE_ENV_VALUE" "$WS_CONCIERGE" "$WS_ANALYST" "$WS_DS" "$WS_CUSTOMER" <<'PY'
+import json
+import os
+import sys
 
-    cat > "$CONFIG_FILE" << EOF
-{
-  "env": {
-    ${INFERENCE_ENV_BLOCK}
-  },
-  "agents": {
-    "defaults": {
-      "model": "${MODEL}",
-      "workspace": "${WS_CONCIERGE}"
+(
+    config_file,
+    model,
+    inference_env_key,
+    inference_env_value,
+    concierge_ws,
+    analyst_ws,
+    ds_ws,
+    customer_ws,
+) = sys.argv[1:]
+allow_from = [
+    f"tg:{uid.strip()}"
+    for uid in os.environ["TELEGRAM_ALLOW_FROM"].split(",")
+    if uid.strip()
+]
+config = {
+    "env": {
+        inference_env_key: inference_env_value,
     },
-    "analyst": {
-      "model": "${MODEL}",
-      "workspace": "${WS_ANALYST}"
+    "agents": {
+        "defaults": {
+            "model": model,
+            "workspace": concierge_ws,
+        },
+        "analyst": {
+            "model": model,
+            "workspace": analyst_ws,
+        },
+        "data-scientist": {
+            "model": model,
+            "workspace": ds_ws,
+        },
+        "customer-intel": {
+            "model": model,
+            "workspace": customer_ws,
+        },
     },
-    "data-scientist": {
-      "model": "${MODEL}",
-      "workspace": "${WS_DS}"
+    "channels": {
+        "telegram": {
+            "botToken": os.environ["TELEGRAM_BOT_TOKEN"],
+            "allowFrom": allow_from,
+        },
     },
-    "customer-intel": {
-      "model": "${MODEL}",
-      "workspace": "${WS_CUSTOMER}"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "botToken": "${TELEGRAM_BOT_TOKEN}",
-      "allowFrom": ${ALLOW_JSON}
-    }
-  },
-  "gateway": {
-    "bind": "lan"
-  }
+    "gateway": {
+        "bind": "lan",
+    },
 }
-EOF
+with open(config_file, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+PY
     chmod 600 "$CONFIG_FILE"
 fi
 

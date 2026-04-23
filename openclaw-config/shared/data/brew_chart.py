@@ -79,6 +79,10 @@ def send(fig, path, caption=None):
     if caption:
         cmd.append(caption)
 
+    chat_id = os.environ.get("BREWLYTICS_TELEGRAM_CHAT_ID")
+    if chat_id:
+        cmd.append(chat_id)
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.stdout:

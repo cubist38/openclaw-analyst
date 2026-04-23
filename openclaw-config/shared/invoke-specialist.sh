@@ -7,18 +7,17 @@
 #
 # Usage:
 #   invoke-specialist.sh <analyst|data-scientist|customer-intel> <session-id> <message...>
+#   invoke-specialist.sh <analyst|data-scientist|customer-intel> <message>
 
 set -euo pipefail
 
-if [ "$#" -lt 3 ]; then
-  echo "Usage: invoke-specialist.sh <analyst|data-scientist|customer-intel> <session-id> <message...>" >&2
+if [ "$#" -lt 2 ]; then
+  echo "Usage: invoke-specialist.sh <analyst|data-scientist|customer-intel> [session-id] <message...>" >&2
   exit 2
 fi
 
 AGENT="$1"
-SESSION="$2"
-shift 2
-MESSAGE="$*"
+shift
 
 case "$AGENT" in
   analyst|data-scientist|customer-intel) ;;
@@ -28,4 +27,36 @@ case "$AGENT" in
     ;;
 esac
 
-exec openclaw agent --agent "$AGENT" --local --session-id "$SESSION" -m "$MESSAGE"
+SESSION=""
+case "${1:-}" in
+  tg:[0-9]*|telegram:[0-9]*|[0-9]*|-|stateless)
+    SESSION="$1"
+    shift
+    ;;
+esac
+MESSAGE="$*"
+
+if [ -z "$MESSAGE" ]; then
+  echo "ERROR: message cannot be empty" >&2
+  exit 2
+fi
+
+# If OpenClaw uses Telegram-flavored session IDs, pass the chat through to
+# chart helpers so generated images only go back to the requesting chat.
+case "$SESSION" in
+  tg:[0-9]*)
+    export BREWLYTICS_TELEGRAM_CHAT_ID="${SESSION#tg:}"
+    ;;
+  telegram:[0-9]*)
+    export BREWLYTICS_TELEGRAM_CHAT_ID="${SESSION#telegram:}"
+    ;;
+  [0-9]*)
+    export BREWLYTICS_TELEGRAM_CHAT_ID="$SESSION"
+    ;;
+esac
+
+if [ -n "$SESSION" ] && [ "$SESSION" != "-" ] && [ "$SESSION" != "stateless" ]; then
+  exec openclaw agent --agent "$AGENT" --local --session-id "$SESSION" -m "$MESSAGE"
+fi
+
+exec openclaw agent --agent "$AGENT" --local -m "$MESSAGE"

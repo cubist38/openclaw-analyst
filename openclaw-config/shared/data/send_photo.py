@@ -7,7 +7,8 @@ Usage:
     python3 data/send_photo.py data/chart.png "Revenue up 12% MoM"
     python3 data/send_photo.py data/chart.png "caption" 123456789
 
-If no chat_id is given, sends to all allowed users in openclaw.json.
+If no chat_id is given, uses BREWLYTICS_TELEGRAM_CHAT_ID. It never broadcasts
+to all allowed users implicitly.
 """
 import http.client
 import json
@@ -103,8 +104,14 @@ def main():
     if explicit_chat_id:
         chat_ids = [explicit_chat_id]
     else:
-        allow_from = config["channels"]["telegram"]["allowFrom"]
-        chat_ids = [uid.replace("tg:", "") for uid in allow_from]
+        env_chat_id = os.environ.get("BREWLYTICS_TELEGRAM_CHAT_ID")
+        if not env_chat_id:
+            print(
+                "WARNING: No Telegram chat id available; saved image locally only.",
+                file=sys.stderr,
+            )
+            return
+        chat_ids = [env_chat_id]
 
     for cid in chat_ids:
         send_photo(token, cid, image_path, caption)
