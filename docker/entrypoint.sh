@@ -92,11 +92,21 @@ import os
 import sys
 
 config_file, provider, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
-allow_from = [
-    f"tg:{uid.strip()}"
-    for uid in os.environ["TELEGRAM_ALLOW_FROM"].split(",")
-    if uid.strip()
-]
+allow_from = []
+groups = {}
+for raw in os.environ["TELEGRAM_ALLOW_FROM"].split(","):
+    entry = raw.strip()
+    if not entry:
+        continue
+    if entry.startswith(("tg:", "telegram:")):
+        entry = entry.split(":", 1)[1].strip()
+    if entry == "*":
+        allow_from.append(entry)
+    elif entry.startswith("-") and entry[1:].isdigit():
+        groups.setdefault(entry, {"requireMention": False})
+    else:
+        allow_from.append(entry)
+dm_policy = "open" if "*" in allow_from else None
 env = {}
 models_config = None
 if provider == "openrouter":
@@ -172,6 +182,8 @@ config = {
         "telegram": {
             "botToken": os.environ["TELEGRAM_BOT_TOKEN"],
             "allowFrom": allow_from,
+            **({"groups": groups} if groups else {}),
+            **({"dmPolicy": dm_policy} if dm_policy else {}),
         },
     },
     "gateway": {
@@ -192,6 +204,50 @@ else
     echo "  NOTE: Changes to OPENCLAW_PROVIDER, OPENCLAW_MODEL, model credentials,"
     echo "  TELEGRAM_BOT_TOKEN, or TELEGRAM_ALLOW_FROM env vars will NOT take effect until the volume is reset."
     echo "  To reconfigure: docker compose down -v && docker compose up -d"
+
+    python3 - "$CONFIG_FILE" <<'PY'
+import json
+import sys
+
+config_file = sys.argv[1]
+with open(config_file) as f:
+    config = json.load(f)
+
+telegram = config.get("channels", {}).get("telegram")
+if not isinstance(telegram, dict):
+    raise SystemExit(0)
+
+changed = False
+normalized = []
+groups = telegram.setdefault("groups", {})
+for raw in telegram.get("allowFrom") or []:
+    entry = str(raw).strip()
+    lower = entry.lower()
+    if lower.startswith(("tg:", "telegram:")):
+        entry = entry.split(":", 1)[1].strip()
+        changed = True
+    if entry == "*":
+        normalized.append(entry)
+        if telegram.get("dmPolicy") != "open":
+            telegram["dmPolicy"] = "open"
+            changed = True
+    elif entry.startswith("-") and entry[1:].isdigit():
+        groups.setdefault(entry, {"requireMention": False})
+        changed = True
+    else:
+        normalized.append(entry)
+
+if normalized != (telegram.get("allowFrom") or []):
+    telegram["allowFrom"] = normalized
+    changed = True
+if not groups and "groups" in telegram:
+    del telegram["groups"]
+if changed:
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+    print("[entrypoint] Migrated Telegram allowFrom entries in existing config")
+PY
 fi
 
 # Agents are declared directly in openclaw.json above. Avoid calling
