@@ -79,20 +79,31 @@ cd openclaw-analyst
 cp .env.example .env
 # Edit .env with Telegram credentials and either OpenRouter or vLLM settings
 
-docker compose up -d
+docker compose up -d --build
 ```
 
 On first boot the container:
 
-- Generates `openclaw.json` with all 4 agents (concierge + 3 specialists)
+- Starts as root only long enough to create and `chown` the mounted `openclaw-data` volume, then runs OpenClaw as the unprivileged `node` user
+- Generates `openclaw.json` with all 4 agents using the current OpenClaw schema (`agents.defaults` + `agents.list`)
 - Writes a per-agent `exec-approvals.json` (concierge: wrapper-only; specialists: `sqlite3` + `python3`)
 - Generates the shared SQLite DB once at `~/.openclaw/shared-data/`
 - Populates each of the 4 workspaces with the right files
-- Starts the gateway
+- Starts the gateway with `gateway.mode=local` on port `18789`
 
 Then message your Telegram bot: **"What are my top 5 stores by revenue?"** — the concierge routes it to `analyst`.
 
 > **Tip:** Use your numeric Telegram user ID for `TELEGRAM_ALLOW_FROM` — the username resolver is unreliable. Get it from [@userinfobot](https://t.me/userinfobot).
+> Avoid `TELEGRAM_ALLOW_FROM=*` except for short smoke tests; it lets anyone who can reach the bot message it.
+
+Verify the container:
+
+```bash
+docker compose ps
+docker compose exec analyst-bot node -e "fetch('http://127.0.0.1:18789/healthz').then(async r=>{console.log(r.status, await r.text()); process.exit(r.ok?0:1)}).catch(e=>{console.error(e); process.exit(1)})"
+```
+
+`docker compose ps` should eventually show `(healthy)`. The healthcheck has a `20s` start period and then runs every `30s`, so it may briefly show `(health: starting)` while OpenClaw finishes booting.
 
 ## Quick Start (Local)
 
@@ -174,6 +185,8 @@ Each specialist workspace contains its own `SOUL.md`, `AGENTS.md`, `BRAND.md`, `
 
 Synthetic Starbucks business data — **no real customer or business information**. The default config generates 50 stores across 6 US regions for Q1 2026. Everything is configurable via `configs/config.yaml`.
 
+With the default seed/config, the generator creates 21 business tables plus SQLite's internal `sqlite_sequence` table. A tested Docker first boot produced 52,985 total rows including `sqlite_sequence`.
+
 | Table | Default Rows | Description |
 |---|---|---|
 | regions | 6 | US regions (Pacific NW, West, Southwest, Midwest, Southeast, Northeast) |
@@ -183,8 +196,8 @@ Synthetic Starbucks business data — **no real customer or business information
 | customers | 200 | Rewards members with tiers (none/green/gold) |
 | suppliers | 20 | Supply chain partners (beans, dairy, syrups, food, packaging) |
 | daily_sales | 4,500 | Daily revenue per store |
-| product_sales | 3,900 | Weekly product-level sales by store |
-| customer_orders | ~1,700 | Individual orders with payment method and mobile flag |
+| product_sales | 16,380 | Weekly product-level sales by sampled store/product combinations |
+| customer_orders | ~1,600 | Individual orders with payment method and mobile flag |
 | loyalty_transactions | ~1,300 | Stars earned/redeemed by rewards members |
 | labor_schedule | ~15,000 | Shift records with overtime tracking |
 | store_traffic | 9,100 | Hourly foot traffic with conversion rates |
@@ -192,9 +205,9 @@ Synthetic Starbucks business data — **no real customer or business information
 | financial_summary | 150 | Monthly P&L by store |
 | customer_feedback | 200 | Ratings (1-5) by category |
 | marketing_campaigns | 15 | Campaigns across email/social/in-store/app |
-| waste_log | ~660 | Product waste by reason |
-| delivery_orders | ~500 | Uber Eats / DoorDash orders |
-| training_records | ~360 | Employee training completions |
+| waste_log | ~640 | Product waste by reason |
+| delivery_orders | ~450 | Uber Eats / DoorDash orders |
+| training_records | ~390 | Employee training completions |
 | regional_performance | 12 | YoY regional comparison |
 | menu_pricing_history | ~100 | Historical price changes |
 
@@ -228,8 +241,20 @@ After editing, regenerate:
 ```bash
 rm ~/.openclaw/shared-data/starbucks_business.db
 bash install.sh          # local
-# or
-docker compose restart   # docker (wipes only the DB; workspaces stay)
+```
+
+For Docker, either reset the full persisted volume:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+Or remove only the generated DB from the running container, then restart:
+
+```bash
+docker compose exec analyst-bot rm /home/node/.openclaw/shared-data/starbucks_business.db
+docker compose restart
 ```
 
 ### Built-in Data Patterns
@@ -337,6 +362,8 @@ openclaw pairing approve zalo <CODE>
 
 ## Docker Details
 
+The Docker path has been smoke-tested with Docker 29.4.0, Docker Compose v5.1.2, and the `ghcr.io/openclaw/openclaw:latest` image reporting OpenClaw 2026.4.21. The base image may move over time, so if OpenClaw changes its config schema again, reset the volume after updating this repo and rebuild.
+
 ### Environment Variables
 
 | Variable | Required | Description |
@@ -388,24 +415,36 @@ Contents of `/home/node/.openclaw/`:
 - `shared-data/starbucks_business.db` — canonical DB
 - `workspace/`, `workspace-analyst/`, `workspace-ds/`, `workspace-customer/` — per-agent state
 
-Config files are re-copied from the image on every start to stay in sync with the repo. The DB and per-agent memory persist across restarts.
+Workspace template files are re-copied from the image on every start to stay in sync with the repo. The DB, generated `openclaw.json`, generated approvals, and per-agent memory persist across restarts.
+
+`openclaw.json` is generated only when the volume does not already contain one. If you change `OPENCLAW_PROVIDER`, `OPENCLAW_MODEL`, model credentials, `TELEGRAM_BOT_TOKEN`, or `TELEGRAM_ALLOW_FROM`, reset the volume with `docker compose down -v` before starting again. This is intentional: the volume contains credentials and runtime state, so the entrypoint does not silently overwrite it.
+
+During boot, OpenClaw may rewrite `openclaw.json` to add runtime metadata, enable configured plugins, and generate `gateway.auth.token`. That is expected.
 
 ### Useful Commands
 
 ```bash
 docker compose logs -f                     # view logs
 docker compose up -d --build               # rebuild after editing configs
-docker compose down -v && docker compose up -d   # full reset
+docker compose down -v && docker compose up -d --build   # full reset
 docker compose exec analyst-bot bash       # shell into the container
 
-# Inside the container — verify agent setup
-openclaw agents list
-cat ~/.openclaw/exec-approvals.json | python3 -m json.tool
+# Verify gateway health from inside the container
+docker compose exec analyst-bot node -e "fetch('http://127.0.0.1:18789/healthz').then(async r=>{console.log(r.status, await r.text()); process.exit(r.ok?0:1)}).catch(e=>{console.error(e); process.exit(1)})"
+
+# Verify the generated DB through a specialist workspace symlink
+docker compose exec analyst-bot sqlite3 /home/node/.openclaw/workspace-analyst/data/starbucks_business.db "select count(*) from stores; select count(*) from daily_sales;"
+
+# Inspect generated config and approvals
+docker compose exec analyst-bot python3 -m json.tool /home/node/.openclaw/openclaw.json
+docker compose exec analyst-bot python3 -m json.tool /home/node/.openclaw/exec-approvals.json
 ```
 
 ### Control UI
 
 The OpenClaw web UI is at `http://localhost:18789` when the container is running.
+
+On the tested Docker Desktop setup, Docker reported `0.0.0.0:18789->18789/tcp` and the gateway health endpoint worked inside the container, but `curl http://127.0.0.1:18789/healthz` from the automation shell could still fail because of host/Docker port-forwarding behavior. If that happens, check `docker compose ps`, the internal health command above, and then open `http://localhost:18789` in your browser.
 
 ## Security via NemoClaw
 
@@ -431,6 +470,13 @@ NemoClaw is alpha. Validate the multi-agent stack on vanilla OpenClaw (`docker c
 | Problem | Fix |
 |---|---|
 | `Unknown model: x-ai/grok-code-fast-1` | Run `openclaw configure` and pick a valid model, or set `OPENCLAW_MODEL` in `.env` |
+| `Config invalid ... agents: Unrecognized keys` | You have an old generated `openclaw.json` in the Docker volume. This project now writes the current OpenClaw `agents.list` schema. Run `docker compose down -v && docker compose up -d --build` to regenerate. |
+| `Gateway start blocked: existing config is missing gateway.mode` | Same root cause: stale generated config. Reset the Docker volume or set `gateway.mode` to `local` in `openclaw.json`. |
+| `PermissionError: ... /home/node/.openclaw/openclaw.json` | Rebuild the image. The Docker entrypoint now fixes mounted volume ownership before dropping to the `node` user. |
+| `docker compose ps` shows `(health: starting)` | Wait for OpenClaw to finish booting and for the first healthcheck. The healthcheck starts after 20s and then runs every 30s. |
+| Host `curl localhost:18789/healthz` fails but container is healthy | Verify with `docker compose exec analyst-bot node -e "fetch('http://127.0.0.1:18789/healthz').then(async r=>console.log(r.status, await r.text()))"`. If that works and `docker compose ps` shows port `18789`, this is a host/Docker port-forwarding issue; try the browser or Docker Desktop settings. |
+| Changed `.env` but container still uses old model/token | `openclaw.json` persists in the Docker volume. Run `docker compose down -v && docker compose up -d --build` to regenerate from `.env`. |
+| vLLM config fails at startup | Use `OPENCLAW_PROVIDER=vllm`, set `OPENCLAW_MODEL` in `vllm/<model-id>` form, and point `VLLM_BASE_URL` at a reachable `/v1` endpoint. |
 | `already running under launchd` | `openclaw daemon stop` first |
 | Concierge answers business questions itself instead of routing | Check that `openclaw-config/agents/concierge/SOUL.md` and `ROUTING.md` are in `~/.openclaw/workspace/` — re-run `install.sh` or restart the container |
 | Specialist can't query DB | `cat ~/.openclaw/exec-approvals.json` — the specialist agent should have sqlite3 + python3 in its allowlist. Re-run install to regenerate |
