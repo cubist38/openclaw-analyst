@@ -47,6 +47,21 @@ seed_memory_files() {
     done
 }
 
+render_routing_md() {
+    local target="$1"
+    local invoke_path="$2"
+
+    python3 - "$CONFIG_SRC/agents/concierge/ROUTING.md" "$target" "$invoke_path" <<'PY'
+import pathlib
+import sys
+
+src, dst, invoke_path = sys.argv[1:]
+text = pathlib.Path(src).read_text()
+text = text.replace("__INVOKE_SPECIALIST_PATH__", invoke_path)
+pathlib.Path(dst).write_text(text)
+PY
+}
+
 # --- Validate required env ---
 for var in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
     if [ -z "${!var}" ]; then
@@ -328,6 +343,35 @@ EOF
     echo "[entrypoint] Approvals written"
 else
     echo "[entrypoint] Exec approvals exist, skipping creation"
+    python3 - "$APPROVALS_FILE" "$CONCIERGE_WS" <<'PY'
+import json
+import sys
+
+approvals_file, concierge_ws = sys.argv[1:]
+with open(approvals_file) as f:
+    approvals = json.load(f)
+
+main = approvals.setdefault("agents", {}).setdefault("main", {})
+allowlist = main.setdefault("allowlist", [])
+patterns = {entry.get("pattern") for entry in allowlist if isinstance(entry, dict)}
+
+needed = [
+    f"{concierge_ws}/invoke-specialist.sh",
+    "./invoke-specialist.sh",
+]
+
+changed = False
+for pattern in needed:
+    if pattern not in patterns:
+        allowlist.append({"pattern": pattern})
+        changed = True
+
+if changed:
+    with open(approvals_file, "w") as f:
+        json.dump(approvals, f, indent=2)
+        f.write("\n")
+    print("[entrypoint] Migrated concierge approvals for invoke-specialist.sh")
+PY
 fi
 
 # --- Generate shared DB if missing ---
@@ -350,10 +394,15 @@ fi
 echo "[entrypoint] Installing concierge workspace..."
 seed_memory_files "$CONCIERGE_WS"
 cp "$CONFIG_SRC/shared/BRAND.md"                       "$CONCIERGE_WS/BRAND.md"
+cp "$CONFIG_SRC/shared/IDENTITY.md"                    "$CONCIERGE_WS/IDENTITY.md"
+cp "$CONFIG_SRC/shared/USER.md"                        "$CONCIERGE_WS/USER.md"
+cp "$CONFIG_SRC/shared/TOOLS.md"                       "$CONCIERGE_WS/TOOLS.md"
+cp "$CONFIG_SRC/shared/HEARTBEAT.md"                   "$CONCIERGE_WS/HEARTBEAT.md"
+cp "$CONFIG_SRC/shared/BOOTSTRAP.md"                   "$CONCIERGE_WS/BOOTSTRAP.md"
 cp "$CONFIG_SRC/shared/MEMORY_RULES.md"                "$CONCIERGE_WS/MEMORY_RULES.md"
 cp "$CONFIG_SRC/agents/concierge/SOUL.md"              "$CONCIERGE_WS/SOUL.md"
 cp "$CONFIG_SRC/agents/concierge/AGENTS.md"            "$CONCIERGE_WS/AGENTS.md"
-cp "$CONFIG_SRC/agents/concierge/ROUTING.md"           "$CONCIERGE_WS/ROUTING.md"
+render_routing_md "$CONCIERGE_WS/ROUTING.md"           "$CONCIERGE_WS/invoke-specialist.sh"
 cp "$CONFIG_SRC/agents/concierge/GROUP_CHAT.md"        "$CONCIERGE_WS/GROUP_CHAT.md"
 cp "$CONFIG_SRC/agents/concierge/HEARTBEAT_GUIDE.md"   "$CONCIERGE_WS/HEARTBEAT_GUIDE.md"
 cp "$CONFIG_SRC/shared/invoke-specialist.sh"           "$CONCIERGE_WS/invoke-specialist.sh"
@@ -370,6 +419,11 @@ install_specialist() {
 
     # Shared files (BRAND, DATA_ANALYST, MEMORY_RULES, SCHEMA, chart helpers)
     cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"
+    cp "$CONFIG_SRC/shared/IDENTITY.md"         "$workspace/IDENTITY.md"
+    cp "$CONFIG_SRC/shared/USER.md"             "$workspace/USER.md"
+    cp "$CONFIG_SRC/shared/TOOLS.md"            "$workspace/TOOLS.md"
+    cp "$CONFIG_SRC/shared/HEARTBEAT.md"        "$workspace/HEARTBEAT.md"
+    cp "$CONFIG_SRC/shared/BOOTSTRAP.md"        "$workspace/BOOTSTRAP.md"
     cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$workspace/DATA_ANALYST.md"
     cp "$CONFIG_SRC/shared/MEMORY_RULES.md"     "$workspace/MEMORY_RULES.md"
     cp "$CONFIG_SRC/shared/data/SCHEMA.md"      "$workspace/data/SCHEMA.md"

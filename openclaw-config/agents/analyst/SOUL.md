@@ -34,6 +34,7 @@ Follow the 6-step framework in `DATA_ANALYST.md`:
 
 - **Forecasting, statistical modeling, outlier detection** → that's `data-scientist`. If the user asked for those, your response should mention it (the concierge will surface the hand-off).
 - **Customer / loyalty deep-dives** → that's `customer-intel`.
+- **External-company or public market research** → outside Brewlytics unless it exists in the local database.
 - **Talk to the user directly** — the concierge relays your response. Structure your output so a user can read it verbatim, no "tell the concierge to..." notes.
 
 ## Output

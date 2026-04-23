@@ -46,6 +46,21 @@ seed_memory_files() {
     done
 }
 
+render_routing_md() {
+    local target="$1"
+    local invoke_path="$2"
+
+    python3 - "$CONFIG_SRC/agents/concierge/ROUTING.md" "$target" "$invoke_path" <<'PY'
+import pathlib
+import sys
+
+src, dst, invoke_path = sys.argv[1:]
+text = pathlib.Path(src).read_text()
+text = text.replace("__INVOKE_SPECIALIST_PATH__", invoke_path)
+pathlib.Path(dst).write_text(text)
+PY
+}
+
 echo "=== Brewlytics Multi-Agent Setup ==="
 echo ""
 
@@ -146,13 +161,18 @@ echo "[6/7] Installing workspace files..."
 # Concierge (main) — no DB, no analyst playbook, no skills
 seed_memory_files "$CONCIERGE_WS"
 cp "$CONFIG_SRC/shared/BRAND.md"                     "$CONCIERGE_WS/BRAND.md"
+cp "$CONFIG_SRC/shared/IDENTITY.md"                  "$CONCIERGE_WS/IDENTITY.md"
+cp "$CONFIG_SRC/shared/USER.md"                      "$CONCIERGE_WS/USER.md"
+cp "$CONFIG_SRC/shared/TOOLS.md"                     "$CONCIERGE_WS/TOOLS.md"
+cp "$CONFIG_SRC/shared/HEARTBEAT.md"                 "$CONCIERGE_WS/HEARTBEAT.md"
+cp "$CONFIG_SRC/shared/BOOTSTRAP.md"                 "$CONCIERGE_WS/BOOTSTRAP.md"
 cp "$CONFIG_SRC/shared/MEMORY_RULES.md"              "$CONCIERGE_WS/MEMORY_RULES.md"
 cp "$CONFIG_SRC/agents/concierge/SOUL.md"            "$CONCIERGE_WS/SOUL.md"
 cp "$CONFIG_SRC/agents/concierge/AGENTS.md"          "$CONCIERGE_WS/AGENTS.md"
-cp "$CONFIG_SRC/agents/concierge/ROUTING.md"         "$CONCIERGE_WS/ROUTING.md"
+cp "$CONFIG_SRC/shared/invoke-specialist.sh"         "$CONCIERGE_WS/invoke-specialist.sh"
+render_routing_md "$CONCIERGE_WS/ROUTING.md"         "$CONCIERGE_WS/invoke-specialist.sh"
 cp "$CONFIG_SRC/agents/concierge/GROUP_CHAT.md"      "$CONCIERGE_WS/GROUP_CHAT.md"
 cp "$CONFIG_SRC/agents/concierge/HEARTBEAT_GUIDE.md" "$CONCIERGE_WS/HEARTBEAT_GUIDE.md"
-cp "$CONFIG_SRC/shared/invoke-specialist.sh"         "$CONCIERGE_WS/invoke-specialist.sh"
 chmod +x "$CONCIERGE_WS/invoke-specialist.sh"
 echo "  Installed concierge in $CONCIERGE_WS"
 
@@ -165,6 +185,11 @@ install_specialist() {
     seed_memory_files "$workspace"
 
     cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"
+    cp "$CONFIG_SRC/shared/IDENTITY.md"         "$workspace/IDENTITY.md"
+    cp "$CONFIG_SRC/shared/USER.md"             "$workspace/USER.md"
+    cp "$CONFIG_SRC/shared/TOOLS.md"            "$workspace/TOOLS.md"
+    cp "$CONFIG_SRC/shared/HEARTBEAT.md"        "$workspace/HEARTBEAT.md"
+    cp "$CONFIG_SRC/shared/BOOTSTRAP.md"        "$workspace/BOOTSTRAP.md"
     cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$workspace/DATA_ANALYST.md"
     cp "$CONFIG_SRC/shared/MEMORY_RULES.md"     "$workspace/MEMORY_RULES.md"
     cp "$CONFIG_SRC/shared/data/SCHEMA.md"      "$workspace/data/SCHEMA.md"

@@ -2,6 +2,10 @@ FROM ghcr.io/openclaw/openclaw:latest
 
 USER root
 
+ENV HOME=/home/node \
+    OPENCLAW_STATE_DIR=/home/node/.openclaw \
+    OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json
+
 # Install Python 3, pip, sqlite3, and system deps for matplotlib rendering
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

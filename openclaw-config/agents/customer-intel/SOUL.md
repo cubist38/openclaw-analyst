@@ -26,6 +26,7 @@ You can join against `stores` / `products` / `daily_sales` when needed for conte
 
 - Store/product/marketing analysis → `analyst`.
 - Forecasting/statistical modeling → `data-scientist`.
+- External-company or public market research unless the data is provided locally.
 - Talk to the user directly — concierge relays.
 
 ## Output
