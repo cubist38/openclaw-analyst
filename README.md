@@ -60,6 +60,7 @@ One delegation per user turn. The specialist suggests a "Next Pour" — the user
 - **Concierge has no SQL, Python, or shell access.** Its only allowlisted executable is `invoke-specialist.sh`, which accepts exactly three specialist names and exactly the one-turn `--local -m` form. A compromised concierge cannot reconfigure OpenClaw, reach other agents arbitrarily, or run shell commands.
 - **Specialists have no channel binding.** They can't read Telegram directly — they only run when the concierge invokes them. Chart delivery is the one intentional outbound path: `brew_chart.send()` can send generated PNGs to the requesting Telegram chat when the concierge passes a Telegram session id.
 - **Each agent has its own workspace** (`~/.openclaw/workspace-{analyst,ds,customer}`). Memory races between specialists are impossible.
+- **Specialist session ids are namespaced by agent.** The concierge can pass the current Telegram chat id through for memory/chart routing without colliding with its own active session lock.
 - **Single shared DB** (`~/.openclaw/shared-data/starbucks_business.db`) symlinked into each specialist. One source of truth, no drift.
 
 ## Prerequisites

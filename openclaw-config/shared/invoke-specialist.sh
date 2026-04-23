@@ -56,7 +56,9 @@ case "$SESSION" in
 esac
 
 if [ -n "$SESSION" ] && [ "$SESSION" != "-" ] && [ "$SESSION" != "stateless" ]; then
-  exec openclaw agent --agent "$AGENT" --local --session-id "$SESSION" -m "$MESSAGE"
+  # Avoid lock contention with the concierge's active session while preserving
+  # the raw Telegram chat id for chart delivery.
+  exec openclaw agent --agent "$AGENT" --local --session-id "${AGENT}:${SESSION}" -m "$MESSAGE"
 fi
 
 exec openclaw agent --agent "$AGENT" --local -m "$MESSAGE"

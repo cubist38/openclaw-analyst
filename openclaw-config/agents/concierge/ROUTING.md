@@ -47,4 +47,4 @@ Never fabricate numbers to hide the failure. An honest "I can't reach that tool"
 
 ## Session ID
 
-Pass the current session ID through to the specialist so it can read the right `memory/` files and so charts can return only to the requesting Telegram chat. If you don't have one, omit the session-id argument and the specialist runs stateless.
+Pass the current session ID through to the specialist so it can read the right `memory/` files and so charts can return only to the requesting Telegram chat. The wrapper namespaces the actual OpenClaw session id by specialist to avoid lock collisions with the concierge's live chat session. If you don't have one, omit the session-id argument and the specialist runs stateless.
