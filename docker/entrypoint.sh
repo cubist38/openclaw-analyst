@@ -36,6 +36,17 @@ fi
 SQLITE3_PATH="$(which sqlite3)"
 PYTHON3_PATH="$(which python3)"
 
+seed_memory_files() {
+    local workspace="$1"
+
+    mkdir -p "$workspace/memory"
+    touch "$workspace/MEMORY.md"
+
+    for day in $(python3 -c 'from datetime import date, timedelta; today = date.today(); print(today.isoformat()); print((today - timedelta(days=1)).isoformat())'); do
+        touch "$workspace/memory/$day.md"
+    done
+}
+
 # --- Validate required env ---
 for var in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM; do
     if [ -z "${!var}" ]; then
@@ -337,7 +348,7 @@ fi
 # --- Concierge workspace (the 'main' agent) ---
 # No DB, no DATA_ANALYST.md, no skills — just routing + persona + memory rules.
 echo "[entrypoint] Installing concierge workspace..."
-mkdir -p "$CONCIERGE_WS/memory"
+seed_memory_files "$CONCIERGE_WS"
 cp "$CONFIG_SRC/shared/BRAND.md"                       "$CONCIERGE_WS/BRAND.md"
 cp "$CONFIG_SRC/shared/MEMORY_RULES.md"                "$CONCIERGE_WS/MEMORY_RULES.md"
 cp "$CONFIG_SRC/agents/concierge/SOUL.md"              "$CONCIERGE_WS/SOUL.md"
@@ -354,7 +365,8 @@ install_specialist() {
     local workspace="$2"
     local extra_file="$3"  # optional, e.g. TECHNICAL_SKILLS.md
 
-    mkdir -p "$workspace/data" "$workspace/memory"
+    mkdir -p "$workspace/data"
+    seed_memory_files "$workspace"
 
     # Shared files (BRAND, DATA_ANALYST, MEMORY_RULES, SCHEMA, chart helpers)
     cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"

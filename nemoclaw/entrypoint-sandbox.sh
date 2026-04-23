@@ -33,6 +33,17 @@ CONFIG_SRC=/app/openclaw-config
 SQLITE3_PATH=$(command -v sqlite3)
 PYTHON3_PATH=$(command -v python3)
 
+seed_memory_files() {
+    local ws="$1"
+
+    mkdir -p "$ws/memory"
+    touch "$ws/MEMORY.md"
+
+    for day in $(python3 -c 'from datetime import date, timedelta; today = date.today(); print(today.isoformat()); print((today - timedelta(days=1)).isoformat())'); do
+        touch "$ws/memory/$day.md"
+    done
+}
+
 # --- Select inference provider ----------------------------------------------
 # Blueprint profile picks this; we mirror the env vars NemoClaw's onboard
 # wizard sets, then fall back to OPENROUTER_API_KEY or VLLM_API_KEY.
@@ -262,7 +273,7 @@ install_specialist() {
     local ws="$2"
     local extra_file="$3"  # optional, e.g. TECHNICAL_SKILLS.md
 
-    mkdir -p "$ws/memory"
+    seed_memory_files "$ws"
 
     cp "$CONFIG_SRC/shared/BRAND.md"          "$ws/BRAND.md"
     cp "$CONFIG_SRC/shared/MEMORY_RULES.md"   "$ws/MEMORY_RULES.md"
@@ -314,6 +325,11 @@ if [ ! -f "$WS_CUSTOMER/SOUL.md" ]; then
     echo "[nemoclaw-entrypoint] Installing customer-intel workspace..."
     install_specialist "customer-intel" "$WS_CUSTOMER"  ""
 fi
+
+seed_memory_files "$WS_CONCIERGE"
+seed_memory_files "$WS_ANALYST"
+seed_memory_files "$WS_DS"
+seed_memory_files "$WS_CUSTOMER"
 
 echo "[nemoclaw-entrypoint] Ready. Launching gateway..."
 exec openclaw gateway run

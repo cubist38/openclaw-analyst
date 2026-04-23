@@ -35,6 +35,17 @@ CONFIG_SRC="${SCRIPT_DIR}/openclaw-config"
 
 MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
 
+seed_memory_files() {
+    local workspace="$1"
+
+    mkdir -p "$workspace/memory"
+    touch "$workspace/MEMORY.md"
+
+    for day in $(python3 -c 'from datetime import date, timedelta; today = date.today(); print(today.isoformat()); print((today - timedelta(days=1)).isoformat())'); do
+        touch "$workspace/memory/$day.md"
+    done
+}
+
 echo "=== Brewlytics Multi-Agent Setup ==="
 echo ""
 
@@ -133,7 +144,7 @@ echo ""
 echo "[6/7] Installing workspace files..."
 
 # Concierge (main) — no DB, no analyst playbook, no skills
-mkdir -p "$CONCIERGE_WS/memory"
+seed_memory_files "$CONCIERGE_WS"
 cp "$CONFIG_SRC/shared/BRAND.md"                     "$CONCIERGE_WS/BRAND.md"
 cp "$CONFIG_SRC/shared/MEMORY_RULES.md"              "$CONCIERGE_WS/MEMORY_RULES.md"
 cp "$CONFIG_SRC/agents/concierge/SOUL.md"            "$CONCIERGE_WS/SOUL.md"
@@ -150,7 +161,8 @@ install_specialist() {
     local workspace="$2"
     local extra_file="$3"
 
-    mkdir -p "$workspace/data" "$workspace/memory"
+    mkdir -p "$workspace/data"
+    seed_memory_files "$workspace"
 
     cp "$CONFIG_SRC/shared/BRAND.md"            "$workspace/BRAND.md"
     cp "$CONFIG_SRC/shared/DATA_ANALYST.md"     "$workspace/DATA_ANALYST.md"
