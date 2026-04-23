@@ -2,7 +2,7 @@
 
 A team of four [OpenClaw](https://openclaw.com) agents that collaborate to answer business questions on a synthetic Starbucks database. A Telegram-bound **concierge** receives every message and routes to the right specialist — descriptive **analyst**, predictive **data-scientist**, or **customer-intel** — then relays the answer back.
 
-Each agent has its own isolated workspace, its own memory, and a scoped exec allowlist. See *[Security via NemoClaw](#security-via-nemoclaw)* for optional kernel-level sandboxing on top.
+Each agent has its own isolated workspace, its own memory, and a scoped exec allowlist.
 
 ## Architecture
 
@@ -444,25 +444,6 @@ docker compose exec analyst-bot python3 -m json.tool /home/node/.openclaw/exec-a
 The OpenClaw web UI is at `http://localhost:18789` when the container is running.
 
 On the tested Docker Desktop setup, Docker reported `0.0.0.0:18789->18789/tcp` and the gateway health endpoint worked inside the container, but `curl http://127.0.0.1:18789/healthz` from the automation shell could still fail because of host/Docker port-forwarding behavior. If that happens, check `docker compose ps`, the internal health command above, and then open `http://localhost:18789` in your browser.
-
-## Security via NemoClaw
-
-This stack gives you **agent-level isolation**: each agent has its own workspace, scoped memory, and a narrow exec allowlist. But the agents still run as your user on your host — if the model is jailbroken into running shell commands, those commands execute in a normal user process.
-
-For **kernel-level sandboxing** (Landlock + seccomp + netns, declarative network egress allowlist, pinned image digest), run this whole stack inside [NemoClaw](https://github.com/NVIDIA/NemoClaw) — NVIDIA's alpha reference stack that boots OpenClaw inside an OpenShell-managed sandbox.
-
-Templates ship in `nemoclaw/`:
-
-| File | Purpose |
-|---|---|
-| [`nemoclaw/blueprint.yaml`](nemoclaw/blueprint.yaml) | NemoClaw blueprint — pinned image + 4 inference profiles (NVIDIA, OpenRouter, NIM, vLLM) |
-| [`nemoclaw/policy-additions.yaml`](nemoclaw/policy-additions.yaml) | Extra `network_policies` on top of the base (openrouter / vllm / nim + python3 Telegram access for chart delivery) |
-| [`nemoclaw/Dockerfile.sandbox`](nemoclaw/Dockerfile.sandbox) | Derivative sandbox image — `FROM` NVIDIA's upstream OpenClaw sandbox, bakes our config, keeps secrets out |
-| [`nemoclaw/entrypoint-sandbox.sh`](nemoclaw/entrypoint-sandbox.sh) | First-boot provisioning inside the sandbox (generates `openclaw.json` + workspaces + DB under writable `/sandbox/.openclaw-data/`) |
-
-Step-by-step instructions — build, pin, onboard, verify, and update — live in **[docs/NEMOCLAW_DEPLOYMENT.md](docs/NEMOCLAW_DEPLOYMENT.md)**.
-
-NemoClaw is alpha. Validate the multi-agent stack on vanilla OpenClaw (`docker compose up`) first, then layer NemoClaw on top.
 
 ## Troubleshooting
 
