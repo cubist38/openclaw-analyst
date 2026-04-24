@@ -1,0 +1,58 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: openclaw-analyst-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-openclaw_root_change_me}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-brewlytics}
+      - MYSQL_READONLY_USER=${MYSQL_READONLY_USER:-brewlytics_ro}
+      - MYSQL_READONLY_PASSWORD=${MYSQL_READONLY_PASSWORD:-brewlytics_readonly_change_me}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 180s
+
+  analyst-bot:
+    build: .
+    container_name: openclaw-analyst
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "18789:18789"
+    environment:
+      - OPENCLAW_PROVIDER=${OPENCLAW_PROVIDER:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-}
+      - VLLM_CONTEXT_WINDOW=${VLLM_CONTEXT_WINDOW:-}
+      - VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS:-}
+      - VLLM_REASONING=${VLLM_REASONING:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM}
+      - OPENCLAW_MODEL=${OPENCLAW_MODEL:-}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-brewlytics}
+      - MYSQL_READONLY_USER=${MYSQL_READONLY_USER:-brewlytics_ro}
+      - MYSQL_READONLY_PASSWORD=${MYSQL_READONLY_PASSWORD:-brewlytics_readonly_change_me}
+      - TZ=${TZ:-UTC}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - openclaw-data:/home/node/.openclaw
+
+volumes:
+  openclaw-data:
+  mysql-data:
