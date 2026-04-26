@@ -6,3 +6,12 @@ README.md
 CONTRIBUTING.md
 LICENSE
 *.db
+
+# Not used inside the analyst-bot image. database/init/ is bind-mounted into
+# the mysql container at runtime via docker-compose, so it doesn't need to
+# travel through the analyst-bot build context.
+database/
+.claude/
+docker-compose.yml
+install.sh
+create_db.sh

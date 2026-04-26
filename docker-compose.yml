@@ -3,6 +3,12 @@ services:
     image: mysql:8.4
     container_name: openclaw-analyst-mysql
     restart: unless-stopped
+    # Behind the `db` profile so day-to-day `docker compose up -d --build`
+    # only rebuilds the bot. Bring the DB up once with
+    #   docker compose --profile db up -d
+    # then leave it running. The `mysql-data` volume keeps the seed across
+    # restarts; init scripts only re-run if the volume is wiped.
+    profiles: ["db"]
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-openclaw_root_change_me}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-brewlytics}
@@ -28,6 +34,10 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+        # `mysql` is in the `db` profile, so plain `docker compose up -d`
+        # doesn't manage it — `required: false` lets the bot start anyway
+        # and just connect to whatever mysql container is already running.
+        required: false
     ports:
       - "18789:18789"
     environment:

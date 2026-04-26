@@ -138,6 +138,11 @@ import json
 import os
 import sys
 
+# Disable the bonjour/mDNS gateway-discovery plugin inside Docker: the bridge
+# network can't actually probe/announce, so the advertiser gets stuck "probing",
+# the watchdog restarts it, and the cancelled @homebridge/ciao promise comes
+# back as an unhandled rejection that crash-loops the gateway. We don't need
+# LAN discovery — the host already publishes 18789 via docker-compose `ports`.
 config_file, provider, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
 allow_from = []
 groups = {}
@@ -239,6 +244,11 @@ config = {
         "bind": "lan",
         "port": 18789,
     },
+    "plugins": {
+        "entries": {
+            "bonjour": {"enabled": False},
+        },
+    },
 }
 if models_config:
     config["models"] = models_config
@@ -251,7 +261,8 @@ else
     echo "[entrypoint] Config exists, skipping generation"
     echo "  NOTE: Changes to OPENCLAW_PROVIDER, OPENCLAW_MODEL, model credentials,"
     echo "  TELEGRAM_BOT_TOKEN, or TELEGRAM_ALLOW_FROM env vars will NOT take effect until the volume is reset."
-    echo "  To reconfigure: docker compose down -v && docker compose up -d"
+    echo "  To reconfigure: docker compose down -v && docker compose up -d --build"
+    echo "  (mysql is behind the 'db' profile, so this wipes only openclaw-data — the seeded DB is preserved.)"
 
     python3 - "$CONFIG_FILE" <<'PY'
 import json
@@ -311,11 +322,21 @@ if normalized != (telegram.get("allowFrom") or []):
     changed = True
 if not groups and "groups" in telegram:
     del telegram["groups"]
+
+# Disable the bonjour mDNS gateway-discovery plugin. See note in the
+# config-generation block above: it crash-loops the gateway in Docker.
+plugins = config.setdefault("plugins", {})
+entries = plugins.setdefault("entries", {})
+bonjour = entries.setdefault("bonjour", {})
+if bonjour.get("enabled") is not False:
+    bonjour["enabled"] = False
+    changed = True
+
 if changed:
     with open(config_file, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
-    print("[entrypoint] Migrated Telegram allowFrom entries in existing config")
+    print("[entrypoint] Migrated existing openclaw.json (telegram normalization and/or plugin defaults)")
 PY
 fi
 

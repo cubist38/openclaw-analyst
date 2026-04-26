@@ -49,15 +49,22 @@ MYSQL_ROOT_PASSWORD=change-this-root-password
 MYSQL_READONLY_PASSWORD=change-this-readonly-password
 ```
 
-Generate the SQL seed files and start:
+Generate the SQL seed files, then bring the database and bot up:
 
 ```bash
 bash create_db.sh
+
+# One-time: build the database. Takes ~3 min while 02_seed.sql imports.
+docker compose --profile db up -d mysql
+
+# Day-to-day: build/restart only the bot — the DB keeps running in the background.
 docker compose up -d --build
 ```
 
-First boot can take several minutes because MySQL imports
-`database/init/02_seed.sql` before the bot starts.
+The `mysql` service sits behind the `db` profile so plain
+`docker compose up -d --build` rebuilds the bot without touching MySQL.
+First boot of the database is the only slow step; afterwards the named
+volume `mysql-data` keeps the seed and `up` is fast.
 
 Verify:
 
@@ -93,19 +100,25 @@ machine's LAN IP or hostname.
 ## Common Commands
 
 ```bash
-# Start or rebuild after code/config changes
+# Bring up the database (one-time, or after a host reboot)
+docker compose --profile db up -d mysql
+
+# Start or rebuild after code/config changes (bot only)
 docker compose up -d --build
 
 # Watch logs
-docker compose logs -f
-docker compose logs -f mysql
 docker compose logs -f analyst-bot
+docker compose --profile db logs -f mysql
 
-# Stop without deleting data
+# Stop the bot, leave the DB running
 docker compose down
 
+# Stop everything (bot + DB), keep data
+docker compose --profile db down
+
 # Full reset: deletes OpenClaw state and MySQL data
-docker compose down -v
+docker compose --profile db down -v
+docker compose --profile db up -d mysql
 docker compose up -d --build
 
 # Check gateway health from inside the bot container
@@ -163,7 +176,8 @@ then regenerate and reset MySQL:
 
 ```bash
 bash create_db.sh
-docker compose down -v
+docker compose --profile db down -v
+docker compose --profile db up -d mysql
 docker compose up -d --build
 ```
 
