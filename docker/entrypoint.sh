@@ -20,6 +20,11 @@ ANALYST_WS="${OPENCLAW_DIR}/workspace-analyst"
 DS_WS="${OPENCLAW_DIR}/workspace-ds"
 CUSTOMER_WS="${OPENCLAW_DIR}/workspace-customer"
 
+CONCIERGE_AGENT_DIR="${OPENCLAW_DIR}/agents/main/agent"
+ANALYST_AGENT_DIR="${OPENCLAW_DIR}/agents/analyst/agent"
+DS_AGENT_DIR="${OPENCLAW_DIR}/agents/data-scientist/agent"
+CUSTOMER_AGENT_DIR="${OPENCLAW_DIR}/agents/customer-intel/agent"
+
 CONFIG_FILE="${OPENCLAW_DIR}/openclaw.json"
 APPROVALS_FILE="${OPENCLAW_DIR}/exec-approvals.json"
 CONFIG_SRC="/opt/analyst/openclaw-config"
@@ -133,7 +138,7 @@ esac
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[entrypoint] No openclaw.json found — generating from environment..."
 
-    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" <<'PY'
+    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
 import json
 import os
 import sys
@@ -143,7 +148,19 @@ import sys
 # the watchdog restarts it, and the cancelled @homebridge/ciao promise comes
 # back as an unhandled rejection that crash-loops the gateway. We don't need
 # LAN discovery — the host already publishes 18789 via docker-compose `ports`.
-config_file, provider, model, concierge_ws, analyst_ws, ds_ws, customer_ws = sys.argv[1:]
+(
+    config_file,
+    provider,
+    model,
+    concierge_ws,
+    analyst_ws,
+    ds_ws,
+    customer_ws,
+    concierge_agent_dir,
+    analyst_agent_dir,
+    ds_agent_dir,
+    customer_agent_dir,
+) = sys.argv[1:]
 allow_from = []
 groups = {}
 for raw in os.environ["TELEGRAM_ALLOW_FROM"].split(","):
@@ -186,6 +203,7 @@ elif provider == "vllm":
                             "cacheWrite": 0,
                         },
                         "contextWindow": int(os.environ["VLLM_CONTEXT_WINDOW"]),
+                        "contextTokens": int(os.environ["VLLM_CONTEXT_WINDOW"]),
                         "maxTokens": int(os.environ["VLLM_MAX_TOKENS"]),
                     },
                 ],
@@ -201,6 +219,7 @@ config = {
         "defaults": {
             "model": model,
             "workspace": concierge_ws,
+            "skills": [],
         },
         "list": [
             {
@@ -208,28 +227,49 @@ config = {
                 "default": True,
                 "name": "concierge",
                 "workspace": concierge_ws,
+                "agentDir": concierge_agent_dir,
                 "model": model,
+                "skills": [],
             },
             {
                 "id": "analyst",
                 "name": "analyst",
                 "workspace": analyst_ws,
+                "agentDir": analyst_agent_dir,
                 "model": model,
+                "skills": [
+                    "compare",
+                    "executive-summary",
+                    "labor-analysis",
+                    "marketing-roi",
+                    "product-mix",
+                    "store-health",
+                ],
             },
             {
                 "id": "data-scientist",
                 "name": "data-scientist",
                 "workspace": ds_ws,
+                "agentDir": ds_agent_dir,
                 "model": model,
+                "skills": ["anomaly-scan", "trend"],
             },
             {
                 "id": "customer-intel",
                 "name": "customer-intel",
                 "workspace": customer_ws,
+                "agentDir": customer_agent_dir,
                 "model": model,
+                "skills": ["customer-insights"],
             },
         ],
     },
+    "bindings": [
+        {
+            "agentId": "main",
+            "match": {"channel": "telegram"},
+        },
+    ],
     "channels": {
         "telegram": {
             "botToken": os.environ["TELEGRAM_BOT_TOKEN"],
@@ -259,69 +299,165 @@ PY
     echo "[entrypoint] Config created at $CONFIG_FILE"
 else
     echo "[entrypoint] Config exists, skipping generation"
-    echo "  NOTE: Changes to OPENCLAW_PROVIDER, OPENCLAW_MODEL, model credentials,"
-    echo "  TELEGRAM_BOT_TOKEN, or TELEGRAM_ALLOW_FROM env vars will NOT take effect until the volume is reset."
+    echo "  NOTE: Agent definitions, vLLM limits, and routing defaults are reconciled on boot."
+    echo "  TELEGRAM_BOT_TOKEN or TELEGRAM_ALLOW_FROM changes still require a volume reset."
     echo "  To reconfigure: docker compose down -v && docker compose up -d --build"
     echo "  (mysql is behind the 'db' profile, so this wipes only openclaw-data — the seeded DB is preserved.)"
 
-    python3 - "$CONFIG_FILE" <<'PY'
+    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
 import json
+import os
 import sys
 
-config_file = sys.argv[1]
+(
+    config_file,
+    provider,
+    model,
+    concierge_ws,
+    analyst_ws,
+    ds_ws,
+    customer_ws,
+    concierge_agent_dir,
+    analyst_agent_dir,
+    ds_agent_dir,
+    customer_agent_dir,
+) = sys.argv[1:]
 with open(config_file) as f:
     config = json.load(f)
 
-telegram = config.get("channels", {}).get("telegram")
-if not isinstance(telegram, dict):
-    raise SystemExit(0)
-
 changed = False
 
-# Migrate legacy streaming keys. OpenClaw deprecated the flat form
-# (streamMode, scalar `streaming`, chunkMode, blockStreaming, draftChunk,
-# blockStreamingCoalesce) in favour of nested `streaming.{mode,chunkMode,
-# preview.chunk,block.enabled,block.coalesce}`. Strip the legacy keys and
-# set `streaming.mode = "off"` to match our intent.
-legacy_streaming_keys = ("streamMode", "chunkMode", "blockStreaming", "draftChunk", "blockStreamingCoalesce")
-for key in legacy_streaming_keys:
-    if key in telegram:
-        del telegram[key]
+def set_if_changed(target, key, value):
+    global changed
+    if target.get(key) != value:
+        target[key] = value
         changed = True
 
-streaming = telegram.get("streaming")
-if not isinstance(streaming, dict):
-    # Either missing or a legacy scalar (e.g. "off"/"on"/bool) — replace with a dict.
-    telegram["streaming"] = {"mode": "off"}
+agents_config = config.setdefault("agents", {})
+agent_defaults = agents_config.setdefault("defaults", {})
+set_if_changed(agent_defaults, "model", model)
+set_if_changed(agent_defaults, "workspace", concierge_ws)
+set_if_changed(agent_defaults, "skills", [])
+
+desired_agents = [
+    {
+        "id": "main",
+        "default": True,
+        "name": "concierge",
+        "workspace": concierge_ws,
+        "agentDir": concierge_agent_dir,
+        "model": model,
+        "skills": [],
+    },
+    {
+        "id": "analyst",
+        "name": "analyst",
+        "workspace": analyst_ws,
+        "agentDir": analyst_agent_dir,
+        "model": model,
+        "skills": [
+            "compare",
+            "executive-summary",
+            "labor-analysis",
+            "marketing-roi",
+            "product-mix",
+            "store-health",
+        ],
+    },
+    {
+        "id": "data-scientist",
+        "name": "data-scientist",
+        "workspace": ds_ws,
+        "agentDir": ds_agent_dir,
+        "model": model,
+        "skills": ["anomaly-scan", "trend"],
+    },
+    {
+        "id": "customer-intel",
+        "name": "customer-intel",
+        "workspace": customer_ws,
+        "agentDir": customer_agent_dir,
+        "model": model,
+        "skills": ["customer-insights"],
+    },
+]
+
+agent_list = agents_config.setdefault("list", [])
+if not isinstance(agent_list, list):
+    agent_list = []
+    agents_config["list"] = agent_list
     changed = True
-elif streaming.get("mode") != "off":
-    streaming["mode"] = "off"
+for desired in desired_agents:
+    existing = next((a for a in agent_list if isinstance(a, dict) and a.get("id") == desired["id"]), None)
+    if existing is None:
+        agent_list.append(desired)
+        changed = True
+        continue
+    for key, value in desired.items():
+        set_if_changed(existing, key, value)
+
+bindings = config.setdefault("bindings", [])
+if not isinstance(bindings, list):
+    bindings = []
+    config["bindings"] = bindings
+    changed = True
+telegram_main_binding = {"agentId": "main", "match": {"channel": "telegram"}}
+if not any(
+    isinstance(binding, dict)
+    and binding.get("agentId") == "main"
+    and isinstance(binding.get("match"), dict)
+    and binding["match"].get("channel") == "telegram"
+    for binding in bindings
+):
+    bindings.insert(0, telegram_main_binding)
     changed = True
 
-normalized = []
-groups = telegram.setdefault("groups", {})
-for raw in telegram.get("allowFrom") or []:
-    entry = str(raw).strip()
-    lower = entry.lower()
-    if lower.startswith(("tg:", "telegram:")):
-        entry = entry.split(":", 1)[1].strip()
-        changed = True
-    if entry == "*":
-        normalized.append(entry)
-        if telegram.get("dmPolicy") != "open":
-            telegram["dmPolicy"] = "open"
+telegram = config.get("channels", {}).get("telegram")
+if isinstance(telegram, dict):
+    # Migrate legacy streaming keys. OpenClaw deprecated the flat form
+    # (streamMode, scalar `streaming`, chunkMode, blockStreaming, draftChunk,
+    # blockStreamingCoalesce) in favour of nested `streaming.{mode,chunkMode,
+    # preview.chunk,block.enabled,block.coalesce}`. Strip the legacy keys and
+    # set `streaming.mode = "off"` to match our intent.
+    legacy_streaming_keys = ("streamMode", "chunkMode", "blockStreaming", "draftChunk", "blockStreamingCoalesce")
+    for key in legacy_streaming_keys:
+        if key in telegram:
+            del telegram[key]
             changed = True
-    elif entry.startswith("-") and entry[1:].isdigit():
-        groups.setdefault(entry, {"requireMention": False})
-        changed = True
-    else:
-        normalized.append(entry)
 
-if normalized != (telegram.get("allowFrom") or []):
-    telegram["allowFrom"] = normalized
-    changed = True
-if not groups and "groups" in telegram:
-    del telegram["groups"]
+    streaming = telegram.get("streaming")
+    if not isinstance(streaming, dict):
+        # Either missing or a legacy scalar (e.g. "off"/"on"/bool) — replace with a dict.
+        telegram["streaming"] = {"mode": "off"}
+        changed = True
+    elif streaming.get("mode") != "off":
+        streaming["mode"] = "off"
+        changed = True
+
+    normalized = []
+    groups = telegram.setdefault("groups", {})
+    for raw in telegram.get("allowFrom") or []:
+        entry = str(raw).strip()
+        lower = entry.lower()
+        if lower.startswith(("tg:", "telegram:")):
+            entry = entry.split(":", 1)[1].strip()
+            changed = True
+        if entry == "*":
+            normalized.append(entry)
+            if telegram.get("dmPolicy") != "open":
+                telegram["dmPolicy"] = "open"
+                changed = True
+        elif entry.startswith("-") and entry[1:].isdigit():
+            groups.setdefault(entry, {"requireMention": False})
+            changed = True
+        else:
+            normalized.append(entry)
+
+    if normalized != (telegram.get("allowFrom") or []):
+        telegram["allowFrom"] = normalized
+        changed = True
+    if not groups and "groups" in telegram:
+        del telegram["groups"]
 
 # Disable the bonjour mDNS gateway-discovery plugin. See note in the
 # config-generation block above: it crash-loops the gateway in Docker.
@@ -332,11 +468,59 @@ if bonjour.get("enabled") is not False:
     bonjour["enabled"] = False
     changed = True
 
+if provider == "vllm":
+    model_id = model.removeprefix("vllm/")
+    vllm_context_window = int(os.environ["VLLM_CONTEXT_WINDOW"])
+    vllm_max_tokens = int(os.environ["VLLM_MAX_TOKENS"])
+    models_config = config.setdefault("models", {})
+    if models_config.get("mode") != "merge":
+        models_config["mode"] = "merge"
+        changed = True
+    providers = models_config.setdefault("providers", {})
+    vllm_provider = providers.setdefault("vllm", {})
+    provider_desired = {
+        "baseUrl": os.environ["VLLM_BASE_URL"],
+        "apiKey": "${VLLM_API_KEY}",
+        "api": "openai-completions",
+    }
+    for key, value in provider_desired.items():
+        if vllm_provider.get(key) != value:
+            vllm_provider[key] = value
+            changed = True
+    vllm_models = vllm_provider.get("models")
+    if not isinstance(vllm_models, list):
+        vllm_models = []
+        vllm_provider["models"] = vllm_models
+        changed = True
+    target = next((m for m in vllm_models if isinstance(m, dict) and m.get("id") == model_id), None)
+    if target is None:
+        target = {"id": model_id}
+        vllm_models.append(target)
+        changed = True
+    desired = {
+        "name": os.environ.get("VLLM_MODEL_NAME", model_id),
+        "reasoning": os.environ.get("VLLM_REASONING", "false").lower() == "true",
+        "input": ["text"],
+        "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+        },
+        "contextWindow": vllm_context_window,
+        "contextTokens": vllm_context_window,
+        "maxTokens": vllm_max_tokens,
+    }
+    for key, value in desired.items():
+        if target.get(key) != value:
+            target[key] = value
+            changed = True
+
 if changed:
     with open(config_file, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
-    print("[entrypoint] Migrated existing openclaw.json (telegram normalization and/or plugin defaults)")
+    print("[entrypoint] Reconciled existing openclaw.json (telegram/plugin defaults and vLLM model limits)")
 PY
 fi
 
@@ -355,31 +539,35 @@ if [ ! -f "$APPROVALS_FILE" ]; then
   "defaults": {
     "security": "full",
     "ask": "off",
-    "askFallback": "off"
+    "askFallback": "full"
   },
   "agents": {
     "main": {
-      "security": "full",
+      "security": "allowlist",
       "ask": "off",
-      "askFallback": "off",
-      "autoAllowSkills": true
+      "askFallback": "allowlist",
+      "autoAllowSkills": false,
+      "allowlist": [
+        { "pattern": "${CONCIERGE_WS}/read-workspace-file.sh" },
+        { "pattern": "${CONCIERGE_WS}/invoke-specialist.sh" }
+      ]
     },
     "analyst": {
       "security": "full",
       "ask": "off",
-      "askFallback": "off",
+      "askFallback": "full",
       "autoAllowSkills": true
     },
     "data-scientist": {
       "security": "full",
       "ask": "off",
-      "askFallback": "off",
+      "askFallback": "full",
       "autoAllowSkills": true
     },
     "customer-intel": {
       "security": "full",
       "ask": "off",
-      "askFallback": "off",
+      "askFallback": "full",
       "autoAllowSkills": true
     }
   }
@@ -410,28 +598,35 @@ if defaults.get("security") != "full":
 if defaults.get("ask") != "off":
     defaults["ask"] = "off"
     changed = True
-if defaults.get("askFallback") != "off":
-    defaults["askFallback"] = "off"
+if defaults.get("askFallback") != "full":
+    defaults["askFallback"] = "full"
     changed = True
 
-# All 4 agents now run in `full` security mode. The concierge was previously
-# allowlist-only, but small models (e.g. gemini-3-flash) consistently prepended
-# `cd <workspace> && …` to helper invocations. OpenClaw splits chains on `&&`
-# and evaluates each segment; `cd` is a shell builtin with no resolved path,
-# so the `cd` segment could never match an allowlist entry and the whole
-# command denied. That bricked the concierge's bootstrap reads and the model
-# would improvise (python3, mysql, echo, ls, …) — all denied — producing
-# the "fails a lot" UX. The container + TELEGRAM_ALLOW_FROM are the real
-# perimeter; the SOUL/ROUTING prompts still tell the concierge to route
-# instead of analyze.
-for name in ("main", "analyst", "data-scientist", "customer-intel"):
+# Specialists need full host exec for MySQL and workspace-local Python. The
+# concierge is intentionally allowlist-only: it can read its own bootstrap files
+# and call the specialist wrapper, but not run raw openclaw/mysql/python.
+desired_agents = {
+    "main": {
+        "security": "allowlist",
+        "ask": "off",
+        "askFallback": "allowlist",
+        "autoAllowSkills": False,
+        "allowlist": [
+            {"pattern": "/home/node/.openclaw/workspace/read-workspace-file.sh"},
+            {"pattern": "/home/node/.openclaw/workspace/invoke-specialist.sh"},
+        ],
+    },
+    "analyst": {"security": "full", "ask": "off", "askFallback": "full", "autoAllowSkills": True},
+    "data-scientist": {"security": "full", "ask": "off", "askFallback": "full", "autoAllowSkills": True},
+    "customer-intel": {"security": "full", "ask": "off", "askFallback": "full", "autoAllowSkills": True},
+}
+for name, target in desired_agents.items():
     agent = approvals.setdefault("agents", {}).setdefault(name, {})
-    target = {"security": "full", "ask": "off", "askFallback": "off", "autoAllowSkills": True}
     for key, value in target.items():
         if agent.get(key) != value:
             agent[key] = value
             changed = True
-    if "allowlist" in agent:
+    if name != "main" and "allowlist" in agent:
         del agent["allowlist"]
         changed = True
 
@@ -439,7 +634,7 @@ if changed:
     with open(approvals_file, "w") as f:
         json.dump(approvals, f, indent=2)
         f.write("\n")
-    print("[entrypoint] Reconciled exec approvals (full security mode, pruned stale allowlists)")
+    print("[entrypoint] Reconciled exec approvals (concierge allowlist, specialist full exec)")
 PY
 fi
 
