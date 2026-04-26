@@ -107,10 +107,6 @@ fi
 
 case "$PROVIDER" in
     openrouter)
-        if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-            echo "ERROR: OPENROUTER_API_KEY is required when OPENCLAW_PROVIDER=openrouter"
-            exit 1
-        fi
         MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
         ;;
     vllm)
@@ -123,10 +119,6 @@ case "$PROVIDER" in
             exit 1
         fi
         MODEL="$OPENCLAW_MODEL"
-        export VLLM_API_KEY="${VLLM_API_KEY:-vllm-local}"
-        export VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
-        export VLLM_CONTEXT_WINDOW="${VLLM_CONTEXT_WINDOW:-128000}"
-        export VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-8192}"
         ;;
     *)
         echo "ERROR: OPENCLAW_PROVIDER must be one of: openrouter, vllm"
@@ -134,11 +126,49 @@ case "$PROVIDER" in
         ;;
 esac
 
+# Per-agent model overrides. Each defaults to the global MODEL, so leaving them
+# unset preserves the original single-model behavior. Set e.g.
+#   OPENCLAW_CONCIERGE_MODEL=openrouter/anthropic/claude-haiku-4-5
+# to put just the concierge on a stronger instruction-follower while keeping
+# specialists on a self-hosted vLLM backend.
+CONCIERGE_MODEL="${OPENCLAW_CONCIERGE_MODEL:-$MODEL}"
+ANALYST_MODEL="${OPENCLAW_ANALYST_MODEL:-$MODEL}"
+DS_MODEL="${OPENCLAW_DS_MODEL:-$MODEL}"
+CUSTOMER_MODEL="${OPENCLAW_CUSTOMER_MODEL:-$MODEL}"
+
+# Figure out which providers are actually in use across the agent fleet, then
+# validate keys/defaults accordingly. Mixing providers (e.g. openrouter
+# concierge + vllm specialists) is supported; both sets of credentials are
+# required only if both prefixes appear.
+USES_OPENROUTER=0
+USES_VLLM=0
+for m in "$MODEL" "$CONCIERGE_MODEL" "$ANALYST_MODEL" "$DS_MODEL" "$CUSTOMER_MODEL"; do
+    case "$m" in
+        openrouter/*) USES_OPENROUTER=1 ;;
+        vllm/*)       USES_VLLM=1 ;;
+        *)
+            echo "ERROR: model '$m' must use an 'openrouter/' or 'vllm/' prefix"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$USES_OPENROUTER" -eq 1 ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
+    echo "ERROR: OPENROUTER_API_KEY is required (one or more agents use openrouter/* models)"
+    exit 1
+fi
+if [ "$USES_VLLM" -eq 1 ]; then
+    export VLLM_API_KEY="${VLLM_API_KEY:-vllm-local}"
+    export VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
+    export VLLM_CONTEXT_WINDOW="${VLLM_CONTEXT_WINDOW:-128000}"
+    export VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-8192}"
+fi
+
 # --- Generate openclaw.json if missing ---
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[entrypoint] No openclaw.json found — generating from environment..."
 
-    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
+    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_MODEL" "$ANALYST_MODEL" "$DS_MODEL" "$CUSTOMER_MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
 import json
 import os
 import sys
@@ -150,8 +180,11 @@ import sys
 # LAN discovery — the host already publishes 18789 via docker-compose `ports`.
 (
     config_file,
-    provider,
-    model,
+    default_model,
+    concierge_model,
+    analyst_model,
+    ds_model,
+    customer_model,
     concierge_ws,
     analyst_ws,
     ds_ws,
@@ -176,13 +209,31 @@ for raw in os.environ["TELEGRAM_ALLOW_FROM"].split(","):
     else:
         allow_from.append(entry)
 dm_policy = "open" if "*" in allow_from else None
+
+all_models = [default_model, concierge_model, analyst_model, ds_model, customer_model]
+uses_openrouter = any(m.startswith("openrouter/") for m in all_models)
+uses_vllm = any(m.startswith("vllm/") for m in all_models)
+
 env = {}
-models_config = None
-if provider == "openrouter":
+if uses_openrouter:
     env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
-elif provider == "vllm":
-    model_id = model.removeprefix("vllm/")
+if uses_vllm:
     env["VLLM_API_KEY"] = os.environ["VLLM_API_KEY"]
+
+models_config = None
+if uses_vllm:
+    seen = set()
+    distinct_vllm_ids = []
+    for m in all_models:
+        if m.startswith("vllm/"):
+            mid = m.removeprefix("vllm/")
+            if mid not in seen:
+                seen.add(mid)
+                distinct_vllm_ids.append(mid)
+    primary_vllm_id = default_model.removeprefix("vllm/") if default_model.startswith("vllm/") else None
+    vllm_context_window = int(os.environ["VLLM_CONTEXT_WINDOW"])
+    vllm_max_tokens = int(os.environ["VLLM_MAX_TOKENS"])
+    vllm_reasoning = os.environ.get("VLLM_REASONING", "false").lower() == "true"
     models_config = {
         "mode": "merge",
         "providers": {
@@ -192,9 +243,17 @@ elif provider == "vllm":
                 "api": "openai-completions",
                 "models": [
                     {
-                        "id": model_id,
-                        "name": os.environ.get("VLLM_MODEL_NAME", model_id),
-                        "reasoning": os.environ.get("VLLM_REASONING", "false").lower() == "true",
+                        "id": mid,
+                        # VLLM_MODEL_NAME is a single shared display-name hint;
+                        # apply it only to the primary (global) vLLM model and
+                        # let any extra per-agent vLLM models use their id as
+                        # the display name.
+                        "name": (
+                            os.environ.get("VLLM_MODEL_NAME", mid)
+                            if mid == primary_vllm_id
+                            else mid
+                        ),
+                        "reasoning": vllm_reasoning,
                         "input": ["text"],
                         "cost": {
                             "input": 0,
@@ -202,22 +261,21 @@ elif provider == "vllm":
                             "cacheRead": 0,
                             "cacheWrite": 0,
                         },
-                        "contextWindow": int(os.environ["VLLM_CONTEXT_WINDOW"]),
-                        "contextTokens": int(os.environ["VLLM_CONTEXT_WINDOW"]),
-                        "maxTokens": int(os.environ["VLLM_MAX_TOKENS"]),
-                    },
+                        "contextWindow": vllm_context_window,
+                        "contextTokens": vllm_context_window,
+                        "maxTokens": vllm_max_tokens,
+                    }
+                    for mid in distinct_vllm_ids
                 ],
             },
         },
     }
-else:
-    raise SystemExit(f"unsupported provider: {provider}")
 
 config = {
     "env": env,
     "agents": {
         "defaults": {
-            "model": model,
+            "model": default_model,
             "workspace": concierge_ws,
             "skills": [],
         },
@@ -228,7 +286,7 @@ config = {
                 "name": "concierge",
                 "workspace": concierge_ws,
                 "agentDir": concierge_agent_dir,
-                "model": model,
+                "model": concierge_model,
                 "skills": [],
             },
             {
@@ -236,7 +294,7 @@ config = {
                 "name": "analyst",
                 "workspace": analyst_ws,
                 "agentDir": analyst_agent_dir,
-                "model": model,
+                "model": analyst_model,
                 "skills": [
                     "compare",
                     "executive-summary",
@@ -251,7 +309,7 @@ config = {
                 "name": "data-scientist",
                 "workspace": ds_ws,
                 "agentDir": ds_agent_dir,
-                "model": model,
+                "model": ds_model,
                 "skills": ["anomaly-scan", "trend"],
             },
             {
@@ -259,7 +317,7 @@ config = {
                 "name": "customer-intel",
                 "workspace": customer_ws,
                 "agentDir": customer_agent_dir,
-                "model": model,
+                "model": customer_model,
                 "skills": ["customer-insights"],
             },
         ],
@@ -304,15 +362,18 @@ else
     echo "  To reconfigure: docker compose down -v && docker compose up -d --build"
     echo "  (mysql is behind the 'db' profile, so this wipes only openclaw-data — the seeded DB is preserved.)"
 
-    python3 - "$CONFIG_FILE" "$PROVIDER" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
+    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_MODEL" "$ANALYST_MODEL" "$DS_MODEL" "$CUSTOMER_MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
 import json
 import os
 import sys
 
 (
     config_file,
-    provider,
-    model,
+    default_model,
+    concierge_model,
+    analyst_model,
+    ds_model,
+    customer_model,
     concierge_ws,
     analyst_ws,
     ds_ws,
@@ -333,9 +394,27 @@ def set_if_changed(target, key, value):
         target[key] = value
         changed = True
 
+all_models = [default_model, concierge_model, analyst_model, ds_model, customer_model]
+uses_openrouter = any(m.startswith("openrouter/") for m in all_models)
+uses_vllm = any(m.startswith("vllm/") for m in all_models)
+
+# Reconcile env keys: add what we need, drop what's stale. Other env keys set
+# by the user are left untouched.
+env = config.setdefault("env", {})
+if uses_openrouter:
+    set_if_changed(env, "OPENROUTER_API_KEY", os.environ["OPENROUTER_API_KEY"])
+elif "OPENROUTER_API_KEY" in env:
+    del env["OPENROUTER_API_KEY"]
+    changed = True
+if uses_vllm:
+    set_if_changed(env, "VLLM_API_KEY", os.environ["VLLM_API_KEY"])
+elif "VLLM_API_KEY" in env:
+    del env["VLLM_API_KEY"]
+    changed = True
+
 agents_config = config.setdefault("agents", {})
 agent_defaults = agents_config.setdefault("defaults", {})
-set_if_changed(agent_defaults, "model", model)
+set_if_changed(agent_defaults, "model", default_model)
 set_if_changed(agent_defaults, "workspace", concierge_ws)
 set_if_changed(agent_defaults, "skills", [])
 
@@ -346,7 +425,7 @@ desired_agents = [
         "name": "concierge",
         "workspace": concierge_ws,
         "agentDir": concierge_agent_dir,
-        "model": model,
+        "model": concierge_model,
         "skills": [],
     },
     {
@@ -354,7 +433,7 @@ desired_agents = [
         "name": "analyst",
         "workspace": analyst_ws,
         "agentDir": analyst_agent_dir,
-        "model": model,
+        "model": analyst_model,
         "skills": [
             "compare",
             "executive-summary",
@@ -369,7 +448,7 @@ desired_agents = [
         "name": "data-scientist",
         "workspace": ds_ws,
         "agentDir": ds_agent_dir,
-        "model": model,
+        "model": ds_model,
         "skills": ["anomaly-scan", "trend"],
     },
     {
@@ -377,7 +456,7 @@ desired_agents = [
         "name": "customer-intel",
         "workspace": customer_ws,
         "agentDir": customer_agent_dir,
-        "model": model,
+        "model": customer_model,
         "skills": ["customer-insights"],
     },
 ]
@@ -468,10 +547,19 @@ if bonjour.get("enabled") is not False:
     bonjour["enabled"] = False
     changed = True
 
-if provider == "vllm":
-    model_id = model.removeprefix("vllm/")
+if uses_vllm:
+    seen = set()
+    distinct_vllm_ids = []
+    for m in all_models:
+        if m.startswith("vllm/"):
+            mid = m.removeprefix("vllm/")
+            if mid not in seen:
+                seen.add(mid)
+                distinct_vllm_ids.append(mid)
+    primary_vllm_id = default_model.removeprefix("vllm/") if default_model.startswith("vllm/") else None
     vllm_context_window = int(os.environ["VLLM_CONTEXT_WINDOW"])
     vllm_max_tokens = int(os.environ["VLLM_MAX_TOKENS"])
+    vllm_reasoning = os.environ.get("VLLM_REASONING", "false").lower() == "true"
     models_config = config.setdefault("models", {})
     if models_config.get("mode") != "merge":
         models_config["mode"] = "merge"
@@ -492,29 +580,34 @@ if provider == "vllm":
         vllm_models = []
         vllm_provider["models"] = vllm_models
         changed = True
-    target = next((m for m in vllm_models if isinstance(m, dict) and m.get("id") == model_id), None)
-    if target is None:
-        target = {"id": model_id}
-        vllm_models.append(target)
-        changed = True
-    desired = {
-        "name": os.environ.get("VLLM_MODEL_NAME", model_id),
-        "reasoning": os.environ.get("VLLM_REASONING", "false").lower() == "true",
-        "input": ["text"],
-        "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0,
-        },
-        "contextWindow": vllm_context_window,
-        "contextTokens": vllm_context_window,
-        "maxTokens": vllm_max_tokens,
-    }
-    for key, value in desired.items():
-        if target.get(key) != value:
-            target[key] = value
+    for mid in distinct_vllm_ids:
+        target = next((m for m in vllm_models if isinstance(m, dict) and m.get("id") == mid), None)
+        if target is None:
+            target = {"id": mid}
+            vllm_models.append(target)
             changed = True
+        desired = {
+            "name": (
+                os.environ.get("VLLM_MODEL_NAME", mid)
+                if mid == primary_vllm_id
+                else mid
+            ),
+            "reasoning": vllm_reasoning,
+            "input": ["text"],
+            "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+            },
+            "contextWindow": vllm_context_window,
+            "contextTokens": vllm_context_window,
+            "maxTokens": vllm_max_tokens,
+        }
+        for key, value in desired.items():
+            if target.get(key) != value:
+                target[key] = value
+                changed = True
 
 if changed:
     with open(config_file, "w") as f:

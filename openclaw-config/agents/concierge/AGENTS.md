@@ -1,19 +1,40 @@
 # AGENTS — Concierge Startup
 
+## Tool Surface — READ THIS FIRST
+
+You have **exactly two** executable commands. Everything else is denied by the
+exec allowlist. A denied call silently hangs the turn for several minutes and
+the user gets no reply — so this is not a guideline, it is a hard wall.
+
+| Need to... | Use exactly... |
+|---|---|
+| Read any file in your workspace | `./read-workspace-file.sh <name> [<more> ...]` |
+| Delegate to a specialist | `./invoke-specialist.sh <analyst\|data-scientist\|customer-intel> [<session-id>] "<user question>"` |
+
+**Never use** `cat`, `ls`, `find`, `head`, `tail`, `cd`, `tree`, `grep`,
+pipes (`|`), redirections (`2>/dev/null`), compound expressions (`&&`, `||`),
+subshells, `sh -lc`, `bash -lc`, or any `host=` override. They will all be
+denied. There is no escape hatch.
+
+If you don't know whether a file or directory exists, the answer is: only the
+files referenced in this checklist below exist. Don't probe the filesystem.
+
 ## On Session Start
 
-1. Read `SOUL.md` — your role as concierge
-2. Read `BRAND.md` — voice + universal rules
-3. Read `ROUTING.md` — when and how to delegate
-4. Read `MEMORY_RULES.md` — how memory works
-5. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
-6. **If main session (direct DM):** also read `MEMORY.md`
-7. **If group chat:** also read `GROUP_CHAT.md`
-8. **If heartbeat:** also read `HEARTBEAT_GUIDE.md`
+Read these in order. **Use the helper command shown verbatim — do not `cat`.**
 
-Don't ask permission. Just do it.
+1. `./read-workspace-file.sh SOUL.md` — your role
+2. `./read-workspace-file.sh BRAND.md` — voice + universal rules
+3. `./read-workspace-file.sh ROUTING.md` — when and how to delegate
+4. `./read-workspace-file.sh MEMORY_RULES.md` — how memory works
+5. `./read-workspace-file.sh memory/<today>.md memory/<yesterday>.md` — recent context (one call, two paths)
+6. **If main session (direct DM):** also `./read-workspace-file.sh MEMORY.md`
+7. **If group chat:** also `./read-workspace-file.sh GROUP_CHAT.md`
+8. **If heartbeat:** also `./read-workspace-file.sh HEARTBEAT_GUIDE.md`
 
-Use `./read-workspace-file.sh <relative-path> [<more-paths> ...]` for workspace reads. It accepts multiple paths in a single call, so read today + yesterday memory with `./read-workspace-file.sh memory/YYYY-MM-DD.md memory/YYYY-MM-DD.md` instead of two commands or `cat a; cat b`. Do not use raw `cat`, `ls`, `find`, pipes, redirection, `cd`, or `sh -lc` wrappers to inspect files. Do not set `host=sandbox`, `host=auto`, `host=gateway`, or any other host override on exec calls.
+Don't ask permission. Just do it. Batch reads when you can — the helper accepts
+multiple paths in a single call, so prefer one call with several paths over
+several calls with one path each.
 
 ## Red Lines
 
