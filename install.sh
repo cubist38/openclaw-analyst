@@ -35,6 +35,10 @@ APPROVALS_FILE="${OPENCLAW_DIR}/exec-approvals.json"
 CONFIG_SRC="${SCRIPT_DIR}/openclaw-config"
 
 MODEL="${OPENCLAW_MODEL:-openrouter/x-ai/grok-3-fast}"
+CONCIERGE_MODEL="${OPENCLAW_CONCIERGE_MODEL:-$MODEL}"
+ANALYST_MODEL="${OPENCLAW_ANALYST_MODEL:-$MODEL}"
+DS_MODEL="${OPENCLAW_DS_MODEL:-$MODEL}"
+CUSTOMER_MODEL="${OPENCLAW_CUSTOMER_MODEL:-$MODEL}"
 
 MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
@@ -97,13 +101,18 @@ PY
 }
 
 reconcile_openclaw_agents_config() {
-    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
+    python3 - "$CONFIG_FILE" "$MODEL" "$CONCIERGE_MODEL" "$ANALYST_MODEL" "$DS_MODEL" "$CUSTOMER_MODEL" "$CONCIERGE_WS" "$ANALYST_WS" "$DS_WS" "$CUSTOMER_WS" "$CONCIERGE_AGENT_DIR" "$ANALYST_AGENT_DIR" "$DS_AGENT_DIR" "$CUSTOMER_AGENT_DIR" <<'PY'
 import json
+import os
 import sys
 
 (
     config_file,
-    model,
+    default_model,
+    concierge_model,
+    analyst_model,
+    ds_model,
+    customer_model,
     concierge_ws,
     analyst_ws,
     ds_ws,
@@ -125,9 +134,19 @@ def set_if_changed(target, key, value):
         target[key] = value
         changed = True
 
+all_models = [default_model, concierge_model, analyst_model, ds_model, customer_model]
+uses_openrouter = any(m.startswith("openrouter/") for m in all_models)
+uses_vllm = any(m.startswith("vllm/") for m in all_models)
+
+env = config.setdefault("env", {})
+if uses_openrouter and os.environ.get("OPENROUTER_API_KEY"):
+    set_if_changed(env, "OPENROUTER_API_KEY", os.environ["OPENROUTER_API_KEY"])
+if uses_vllm:
+    set_if_changed(env, "VLLM_API_KEY", os.environ.get("VLLM_API_KEY", "vllm-local"))
+
 agents_config = config.setdefault("agents", {})
 agent_defaults = agents_config.setdefault("defaults", {})
-set_if_changed(agent_defaults, "model", model)
+set_if_changed(agent_defaults, "model", default_model)
 set_if_changed(agent_defaults, "workspace", concierge_ws)
 set_if_changed(agent_defaults, "skills", [])
 
@@ -138,7 +157,7 @@ desired_agents = [
         "name": "concierge",
         "workspace": concierge_ws,
         "agentDir": concierge_agent_dir,
-        "model": model,
+        "model": concierge_model,
         "skills": [],
     },
     {
@@ -146,7 +165,7 @@ desired_agents = [
         "name": "analyst",
         "workspace": analyst_ws,
         "agentDir": analyst_agent_dir,
-        "model": model,
+        "model": analyst_model,
         "skills": [
             "compare",
             "executive-summary",
@@ -161,7 +180,7 @@ desired_agents = [
         "name": "data-scientist",
         "workspace": ds_ws,
         "agentDir": ds_agent_dir,
-        "model": model,
+        "model": ds_model,
         "skills": ["anomaly-scan", "trend"],
     },
     {
@@ -169,7 +188,7 @@ desired_agents = [
         "name": "customer-intel",
         "workspace": customer_ws,
         "agentDir": customer_agent_dir,
-        "model": model,
+        "model": customer_model,
         "skills": ["customer-insights"],
     },
 ]
@@ -203,6 +222,69 @@ if not any(
 ):
     bindings.insert(0, {"agentId": "main", "match": {"channel": "telegram"}})
     changed = True
+
+if uses_vllm:
+    seen = set()
+    distinct_vllm_ids = []
+    for model in all_models:
+        if not model.startswith("vllm/"):
+            continue
+        model_id = model.removeprefix("vllm/")
+        if model_id not in seen:
+            seen.add(model_id)
+            distinct_vllm_ids.append(model_id)
+
+    primary_vllm_id = default_model.removeprefix("vllm/") if default_model.startswith("vllm/") else None
+    vllm_context_window = int(os.environ.get("VLLM_CONTEXT_WINDOW", "128000"))
+    vllm_max_tokens = int(os.environ.get("VLLM_MAX_TOKENS", "8192"))
+    vllm_reasoning = os.environ.get("VLLM_REASONING", "false").lower() == "true"
+
+    models_config = config.setdefault("models", {})
+    set_if_changed(models_config, "mode", "merge")
+    providers = models_config.setdefault("providers", {})
+    vllm_provider = providers.setdefault("vllm", {})
+    for key, value in {
+        "baseUrl": os.environ.get("VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
+        "apiKey": "${VLLM_API_KEY}",
+        "api": "openai-completions",
+    }.items():
+        set_if_changed(vllm_provider, key, value)
+
+    vllm_models = vllm_provider.get("models")
+    if not isinstance(vllm_models, list):
+        vllm_models = []
+        vllm_provider["models"] = vllm_models
+        changed = True
+
+    for model_id in distinct_vllm_ids:
+        target = next(
+            (item for item in vllm_models if isinstance(item, dict) and item.get("id") == model_id),
+            None,
+        )
+        if target is None:
+            target = {"id": model_id}
+            vllm_models.append(target)
+            changed = True
+        desired = {
+            "name": (
+                os.environ.get("VLLM_MODEL_NAME", model_id)
+                if model_id == primary_vllm_id
+                else model_id
+            ),
+            "reasoning": vllm_reasoning,
+            "input": ["text"],
+            "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+            },
+            "contextWindow": vllm_context_window,
+            "contextTokens": vllm_context_window,
+            "maxTokens": vllm_max_tokens,
+        }
+        for key, value in desired.items():
+            set_if_changed(target, key, value)
 
 if changed:
     with open(config_file, "w") as f:
@@ -280,21 +362,27 @@ echo ""
 # --- [4/7] Provision specialist agents ---
 echo "[4/7] Provisioning specialist agents..."
 
-for entry in "analyst:${ANALYST_WS}:${ANALYST_AGENT_DIR}" "data-scientist:${DS_WS}:${DS_AGENT_DIR}" "customer-intel:${CUSTOMER_WS}:${CUSTOMER_AGENT_DIR}"; do
-    name="${entry%%:*}"
-    rest="${entry#*:}"
-    ws="${rest%%:*}"
-    agent_dir="${rest##*:}"
+ensure_agent() {
+    local name="$1"
+    local ws="$2"
+    local agent_dir="$3"
+    local agent_model="$4"
+
     if openclaw agents list 2>/dev/null | grep -q " $name "; then
         echo "  Agent '$name' already exists"
     else
-        openclaw agents add "$name" --workspace "$ws" --agent-dir "$agent_dir" --model "$MODEL" \
+        openclaw agents add "$name" --workspace "$ws" --agent-dir "$agent_dir" --model "$agent_model" \
             && echo "  Added agent '$name' at $ws" \
             || echo "  WARNING: 'openclaw agents add $name' failed — check: openclaw agents list"
     fi
-done
+}
+
+ensure_agent "analyst"        "$ANALYST_WS" "$ANALYST_AGENT_DIR" "$ANALYST_MODEL"
+ensure_agent "data-scientist" "$DS_WS"      "$DS_AGENT_DIR"      "$DS_MODEL"
+ensure_agent "customer-intel" "$CUSTOMER_WS" "$CUSTOMER_AGENT_DIR" "$CUSTOMER_MODEL"
+
 reconcile_openclaw_agents_config
-echo "  Reconciled OpenClaw agent config, skill visibility, and Telegram binding"
+echo "  Reconciled OpenClaw agent config, per-agent models, skill visibility, and Telegram binding"
 echo ""
 
 # --- [5/7] Apply generated MySQL init SQL ---
